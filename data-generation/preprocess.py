@@ -180,3 +180,32 @@ probe_test_data_focused = [create_labeled_list_dataset_focused(examples, tokeniz
 print(f"\nGenerated {len(probe_train_data_focused)} training examples for the focused dataset (modified sampling).")
 print(f"Generated {len(probe_test_data_focused)} testing examples for the focused dataset (modified sampling).")
 
+def verify_data(data: list[dict]) -> bool:
+    """
+    Verify the data
+    """
+    if probe_train_data_focused:
+        print("\n--- Verification of a Training Example ---")
+        example_to_check = probe_train_data_focused[1]
+        print(f"Query ID: {example_to_check['original_dataset_item_id']}")
+        print(f"Generated Text: \n---\n{example_to_check['text']}\n---")
+        print(f"Labels List (length {len(example_to_check['labels'])}): \n{example_to_check['labels']}")
+
+        # Find the indices of the positive labels
+        positive_indices = [i for i, label in enumerate(example_to_check['labels']) if label == 1]
+        print(f"\nIndices marked as pivotal (label 1): {positive_indices}")
+
+        # You can further decode tokens at these positions to double-check
+        tokenized_text = tokenizer.encode(example_to_check['text'], add_special_tokens=False)
+        for idx in positive_indices:
+            if idx < len(tokenized_text):
+                # The pivotal position is the one *before* the actual pivot token.
+                # So, the token at this position is the one whose hidden state we'd use.
+                # The token *after* this position is the pivot token itself.
+                token_at_pivotal_pos = tokenizer.decode(tokenized_text[idx])
+                pivot_token = tokenizer.decode(tokenized_text[idx + 1]) if idx + 1 < len(tokenized_text) else "[END OF TEXT]"
+                print(f"  - For pivotal position {idx}, the token is '{token_at_pivotal_pos}'. It precedes the pivot token '{pivot_token}'.")
+    else:
+        print("No training data was generated to verify.")
+    return True
+
