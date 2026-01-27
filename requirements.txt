@@ -1,0 +1,17 @@
+pytorch
+numpy
+pandas
+matplotlib
+seaborn
+scikit-learn
+scipy
+transformers
+datasets
+accelerate
+peft
+bitsandbytes
+trl
+tqdm
+vllm
+wandb
+flash-attn
