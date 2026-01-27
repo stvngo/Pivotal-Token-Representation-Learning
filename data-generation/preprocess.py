@@ -209,3 +209,27 @@ def verify_data(data: list[dict]) -> bool:
         print("No training data was generated to verify.")
     return True
 
+
+def save_data(data: list[dict], path: str) -> None:
+    """
+    Save the data
+    """
+    # Convert the lists of dictionaries to HuggingFace Dataset objects
+    probe_train_dataset_hf = HFDataset.from_list(probe_train_data_focused)
+    probe_test_dataset_hf = HFDataset.from_list(probe_test_data_focused)
+
+    # --- Define New Paths for the Focused Dataset ---
+    FOCUSED_DATA_SAVE_DIR = '/content/drive/My Drive/Algoverse-AI-Model-Probing/probe_dataset_compact_focused_2'
+    TRAIN_DATA_SAVE_PATH = os.path.join(FOCUSED_DATA_SAVE_DIR, "train")
+    TEST_DATA_SAVE_PATH = os.path.join(FOCUSED_DATA_SAVE_DIR, "test")
+
+    os.makedirs(TRAIN_DATA_SAVE_PATH, exist_ok=True)
+    os.makedirs(TEST_DATA_SAVE_PATH, exist_ok=True)
+
+    print(f"Saving focused training dataset to: {TRAIN_DATA_SAVE_PATH}")
+    probe_train_dataset_hf.save_to_disk(TRAIN_DATA_SAVE_PATH)
+
+    print(f"Saving focused testing dataset to: {TEST_DATA_SAVE_PATH}")
+    probe_test_dataset_hf.save_to_disk(TEST_DATA_SAVE_PATH)
+
+    print("\nFinished saving the new focused probe datasets to Google Drive.")
