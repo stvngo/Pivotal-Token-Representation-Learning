@@ -11,7 +11,7 @@ from torch.nn.functional import cross_entropy
 from torch.nn.functional import binary_cross_entropy
 from torch.nn.functional import binary_cross_entropy_with_logits
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score # imbalanced dataset metrics
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split

@@ -108,6 +108,16 @@ def split_pts_by_query(dataset_path: str, test_size: float = 0.2, subset_size: O
 
     return train_dataset, test_dataset
 
+def preview(train_dataset: Dataset, test_dataset: Dataset) -> None:
+    """
+    Preview the dataset
+    """
+    print("Example from balanced train dataset:")
+    print(train_dataset[0])
+
+    print("\nExample from balanced test dataset:")
+    print(test_dataset[0])
+
 def verify_dataset(data: list[dict]) -> bool:
     return True # TODO: Implement dataset verification
 

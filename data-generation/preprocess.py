@@ -158,27 +158,29 @@ def create_labeled_list_dataset(
         'original_dataset_item_id': query_id
     }
 
-# --- Main Execution ---
-# This part will be executed when the cell runs.
-# It will regenerate probe_train_data_focused and probe_test_data_focused
-# using the modified function.
 
-train_query_groups = defaultdict(list)
-for example in train_raw:
-    train_query_groups[example['dataset_item_id']].append(example)
+def create_dataset(train_raw: list[dict], test_raw: list[dict], tokenizer: AutoTokenizer, model: AutoModelForCausalLM, device: str) -> tuple[list[dict], list[dict]]:
+    # --- Main Execution ---
+    # This part will be executed when the cell runs.
+    # It will regenerate probe_train_data_focused and probe_test_data_focused
+    # using the modified function.
 
-test_query_groups = defaultdict(list)
-for example in test_raw:
-    test_query_groups[example['dataset_item_id']].append(example)
+    train_query_groups = defaultdict(list)
+    for example in train_raw:
+        train_query_groups[example['dataset_item_id']].append(example)
 
-print("Generating training data with modified negative sampling...")
-probe_train_data_focused = [create_labeled_list_dataset_focused(examples, tokenizer, model, device) for _, examples in tqdm(train_query_groups.items(), desc="Processing Train Queries")]
+    test_query_groups = defaultdict(list)
+    for example in test_raw:
+        test_query_groups[example['dataset_item_id']].append(example)
 
-print("\nGenerating testing data with modified negative sampling...")
-probe_test_data_focused = [create_labeled_list_dataset_focused(examples, tokenizer, model, device) for _, examples in tqdm(test_query_groups.items(), desc="Processing Test Queries")]
+    print("Generating training data with modified negative sampling...")
+    probe_train_data_focused = [create_labeled_list_dataset_focused(examples, tokenizer, model, device) for _, examples in tqdm(train_query_groups.items(), desc="Processing Train Queries")]
 
-print(f"\nGenerated {len(probe_train_data_focused)} training examples for the focused dataset (modified sampling).")
-print(f"Generated {len(probe_test_data_focused)} testing examples for the focused dataset (modified sampling).")
+    print("\nGenerating testing data with modified negative sampling...")
+    probe_test_data_focused = [create_labeled_list_dataset_focused(examples, tokenizer, model, device) for _, examples in tqdm(test_query_groups.items(), desc="Processing Test Queries")]
+
+    print(f"\nGenerated {len(probe_train_data_focused)} training examples for the focused dataset (modified sampling).")
+    print(f"Generated {len(probe_test_data_focused)} testing examples for the focused dataset (modified sampling).")
 
 def verify_data(data: list[dict]) -> bool:
     """
