@@ -1,0 +1,63 @@
+### Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.coverage
+coverage.xml
+htmlcov/
+
+### Environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+### Jupyter / IPython
+.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+
+### IDEs / editors
+.idea/
+.vscode/
+*.code-workspace
+
+### OS junk
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+### Experiment tracking
+wandb/
+mlruns/
+
+### Logs & temp
+*.log
+*.tmp
+tmp/
+
+### Model / dataset artifacts (usually large)
+checkpoints/
+outputs/
+results/
+
+# Cached activations / generated datasets
+data/**/*.pth
+data/**/cached_activations*/
+data/**/cached_activations_*
+data/**/cached_activations_*/
+
+### Hugging Face / Transformers caches (optional)
+hf_cache/
+transformers_cache/
+
+### Torch / compile caches
+torch_compile_cache/
+
