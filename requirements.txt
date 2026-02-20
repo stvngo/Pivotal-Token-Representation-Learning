@@ -12,6 +12,8 @@ peft
 bitsandbytes
 trl
 tqdm
-vllm
+# vllm
 wandb
-flash-attn
+# flash-attn
+pyyaml
+pytest

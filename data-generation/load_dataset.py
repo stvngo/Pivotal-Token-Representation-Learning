@@ -1,125 +1,58 @@
-'''
-Load the dataset from the given path
-'''
+"""Dataset loading wrappers for the probe pipeline."""
 
-from datasets import load_dataset, Dataset
-from typing import List, Dict, Tuple, Optional
-from sklearn.model_selection import train_test_split
-import pandas as pd
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import time
+from __future__ import annotations
 
-def load_dataset(path: str) -> list[dict]:
-    return data # TODO: Implement dataset loading
+from typing import Any
 
-def split_pts_by_query(dataset_path: str, test_size: float = 0.2, subset_size: Optional[int] = None) -> Tuple[Dataset, Dataset]:
-    """
-    Load PTS dataset, remove duplicates, and split by query ID to avoid data leakage.
+from datasets import Dataset
 
-    :param dataset_path: Path/name of your PTS dataset on HuggingFace
-    :param test_size: Fraction for test split
-    :param subset_size: If provided, creates a subset of the dataset for debugging.
-    :return: train_dataset, test_dataset split by query
-    """
-    # Load the PTS dataset with explicit configuration
-    print(f"Loading dataset: {dataset_path}")
-
-    try:
-        # Try loading without any wildcards or special patterns
-        dataset = load_dataset(dataset_path, split='train')
-        print(f"Loaded {len(dataset)} examples")
-
-    except Exception as e:
-        print(f"Error with split='train', trying default loading: {e}")
-        try:
-            # Try loading all splits then select one
-            dataset_dict = load_dataset(dataset_path)
-            print(f"Available splits: {list(dataset_dict.keys())}")
-
-            # Get the main split
-            if 'train' in dataset_dict:
-                dataset = dataset_dict['train']
-            else:
-                split_name = list(dataset_dict.keys())[0]
-                dataset = dataset_dict[split_name]
-                print(f"Using split: {split_name}")
-
-        except Exception as e2:
-            print(f"Final error: {e2}")
-            print("Try loading the dataset manually first to debug")
-            raise e2
-
-    # Create a subset if requested
-    if subset_size:
-        dataset = dataset.select(range(min(subset_size, len(dataset))))
-        print(f"Using a subset of {len(dataset)} examples for debugging.")
-
-    # Remove duplicates
-    df = dataset.to_pandas()
-
-    # Drop the timestamp column if it exists
-    if 'timestamp' in df.columns:
-        df = df.drop(columns=['timestamp'])
-        print("Dropped the 'timestamp' column.")
-
-    num_rows_before = len(df)
-    df_deduplicated = df.drop_duplicates()
-    num_rows_after = len(df_deduplicated)
-    num_duplicates_removed = num_rows_before - num_rows_after
-
-    print(f"Removed {num_duplicates_removed} duplicate rows.")
-    print(f"Number of rows left: {num_rows_after}")
-
-    # Count number of examples where first token is pivotal
-    count = 0
-    for _, row in df_deduplicated.iterrows():
-        if row["query"] == row['pivot_context']:
-            count += 1
-
-    total_examples = len(df_deduplicated)
-    percentage = (count / total_examples) * 100
-
-    print(f"Sanity Check Results:")
-    print(f"Number of examples where the first token after the query is pivotal: {count}")
-    print(f"Total number of examples: {total_examples}")
-    print(f"Percentage: {percentage:.2f}%")
-
-    dataset = Dataset.from_pandas(df_deduplicated)
+from probe_pipeline.dataset import (
+    dataset_summary,
+    load_pts_dataset,
+    save_split_datasets,
+    split_pts_by_query as split_pts_by_query_core,
+)
 
 
-    # Get unique query IDs
-    unique_query_ids = list(set(dataset['dataset_item_id']))
-    print(f"Total unique queries: {len(unique_query_ids)}")
+def load_dataset(path: str) -> list[dict[str, Any]]:
+    """Load a dataset and return as list of dictionaries."""
+    dataset = load_pts_dataset(dataset_path=path)
+    return list(dataset)
 
-    # Split query IDs (not individual examples)
-    train_query_ids, test_query_ids = train_test_split( # train: 1,3,4,... | test: 2,5,...
-        unique_query_ids,
+
+def split_pts_by_query(
+    dataset_path: str,
+    test_size: float = 0.2,
+    subset_size: int | None = None,
+) -> tuple[Dataset, Dataset]:
+    """Public wrapper preserving the original function name."""
+    return split_pts_by_query_core(
+        dataset_path=dataset_path,
         test_size=test_size,
-        random_state=42 # for reproducibility
+        subset_size=subset_size,
     )
 
-    # Filter dataset by query splits
-    train_dataset = dataset.filter(lambda x: x['dataset_item_id'] in train_query_ids)
-    test_dataset = dataset.filter(lambda x: x['dataset_item_id'] in test_query_ids)
-
-    print(f"Train queries: {len(train_query_ids)}, Train examples: {len(train_dataset)}")
-    print(f"Test queries: {len(test_query_ids)}, Test examples: {len(test_dataset)}")
-
-    return train_dataset, test_dataset
 
 def preview(train_dataset: Dataset, test_dataset: Dataset) -> None:
-    """
-    Preview the dataset
-    """
-    print("Example from balanced train dataset:")
-    print(train_dataset[0])
+    """Print a quick split preview."""
+    train_info = dataset_summary(train_dataset)
+    test_info = dataset_summary(test_dataset)
+    print(f"Train summary: {train_info}")
+    print(f"Test summary: {test_info}")
+    if len(train_dataset) > 0:
+        print("Train sample:", train_dataset[0])
+    if len(test_dataset) > 0:
+        print("Test sample:", test_dataset[0])
 
-    print("\nExample from balanced test dataset:")
-    print(test_dataset[0])
 
-def verify_dataset(data: list[dict]) -> bool:
-    return True # TODO: Implement dataset verification
+def verify_dataset(data: list[dict[str, Any]]) -> bool:
+    """Simple structural validation."""
+    if not data:
+        return False
+    required = {"dataset_item_id", "query", "pivot_context", "pivot_token"}
+    return required.issubset(set(data[0].keys()))
 
-def save_dataset(data: list[dict], path: str) -> None:
-    return None # TODO: Implement dataset saving
+
+def save_dataset(train_dataset: Dataset, test_dataset: Dataset, path: str) -> dict[str, str]:
+    """Save split datasets at `path/train` and `path/test`."""
+    return save_split_datasets(train_dataset=train_dataset, test_dataset=test_dataset, output_root=path)

@@ -1,36 +1,55 @@
-'''
-Define and train linear probe using the curated dataset
-'''
+"""Compatibility wrappers around the new probe training pipeline."""
 
-import torch
-from torch.utils.data import DataLoader
-from torch.optim import AdamW
-from torch.nn import CrossEntropyLoss
-from torch.nn.functional import softmax
-from torch.nn.functional import cross_entropy
-from torch.nn.functional import binary_cross_entropy
-from torch.nn.functional import binary_cross_entropy_with_logits
+from __future__ import annotations
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score # imbalanced dataset metrics
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
+from typing import Any
 
-from utils.utils import set_seed
-import time
-import os
-import logging
+from probe_pipeline.config import load_yaml_config
+from probe_pipeline.logging_utils import build_logger
+from probe_pipeline.train_pytorch import run_pytorch_training
+from probe_pipeline.train_sklearn import run_sklearn_training
 
-def train_model(model: torch.nn.Module, dataset: list[dict], epochs: int) -> None:
-    """
-    Train the linear probe on the Qwen model's hidden states
-    """
-    return None # TODO: Implement model training
 
-def verify_model(model: torch.nn.Module) -> bool:
-    return True # TODO: Implement model verification
+def train_pytorch_from_config(
+    config_path: str = "configs/pipeline.yaml",
+    layers: list[int] | None = None,
+    num_layers: int | None = None,
+    epochs: int | None = None,
+) -> dict[str, Any]:
+    """Train PyTorch probes using YAML config."""
+    config = load_yaml_config(config_path)
+    logger = build_logger(
+        "models.train.pytorch",
+        config["paths"]["outputs"]["logs_dir"] + "/models_train_pytorch.log",
+    )
+    return run_pytorch_training(
+        config=config,
+        logger=logger,
+        layers_override=layers,
+        num_layers_override=num_layers,
+        epochs_override=epochs,
+    )
 
-def save_model(model: torch.nn.Module, path: str) -> None:
-    return None # TODO: Implement model saving
+
+def train_sklearn_from_config(
+    config_path: str = "configs/pipeline.yaml",
+    layers: list[int] | None = None,
+    num_layers: int | None = None,
+) -> dict[str, Any]:
+    """Train sklearn probes using YAML config."""
+    config = load_yaml_config(config_path)
+    logger = build_logger(
+        "models.train.sklearn",
+        config["paths"]["outputs"]["logs_dir"] + "/models_train_sklearn.log",
+    )
+    return run_sklearn_training(
+        config=config,
+        logger=logger,
+        layers_override=layers,
+        num_layers_override=num_layers,
+    )
+
+
+def train_model(config_path: str = "configs/pipeline.yaml") -> dict[str, Any]:
+    """Backwards-compatible alias: trains PyTorch probes."""
+    return train_pytorch_from_config(config_path=config_path)

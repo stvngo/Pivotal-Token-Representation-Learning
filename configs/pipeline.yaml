@@ -1,0 +1,44 @@
+seed: 42
+device: auto
+
+model:
+  name: Qwen/Qwen3-0.6B
+  trust_remote_code: true
+
+paths:
+  activations:
+    train: data/activations/train_all_layers_acts.pth
+    test: data/activations/test_all_layers_acts.pth
+  datasets:
+    train_probe: data/probe_dataset/train
+    test_probe: data/probe_dataset/test
+  outputs:
+    pytorch_dir: artifacts/pytorch
+    sklearn_dir: artifacts/sklearn
+    plots_dir: artifacts/plots
+    logs_dir: artifacts/logs
+
+training:
+  layers: []
+  num_layers: null
+  epochs: 10
+  batch_size: 32
+  learning_rate: 0.001
+  threshold: 0.5
+  shuffle: true
+  max_train_samples_per_class: null
+  max_val_samples_per_class: null
+
+sklearn:
+  solver: saga
+  max_iter: 3000
+  C: 1.0
+  class_weight: null
+  standardize: true
+  random_state: 42
+
+visualization:
+  layers: []
+  num_layers: 2
+  tsne_perplexity: 30
+

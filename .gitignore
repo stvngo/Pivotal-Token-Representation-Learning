@@ -61,3 +61,8 @@ transformers_cache/
 ### Torch / compile caches
 torch_compile_cache/
 
+### Local pipeline runs
+artifacts/
+data/probe_dataset/
+configs/pipeline.cached*.yaml
+
