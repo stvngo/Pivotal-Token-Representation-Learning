@@ -17,6 +17,18 @@ paths:
     sklearn_dir: artifacts/sklearn
     plots_dir: artifacts/plots
     logs_dir: artifacts/logs
+    gsm8k_eval_dir: artifacts/gsm8k_eval
+
+steering:
+  layers: [14, 16, 20]
+  factors: [1.2, 1.4, 2.0]
+  vector_type: centroid_diff
+
+evaluation:
+  gsm8k_max_examples: 200
+  gsm8k_split: validation
+  max_new_tokens: 256
+  temperature: 0.6
 
 training:
   layers: []

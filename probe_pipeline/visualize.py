@@ -165,6 +165,387 @@ def plot_pca_tsne(
     return saved_paths
 
 
+def plot_activation_heatmap(
+    config: dict[str, Any],
+    logger: Any,
+    backend: str = "pytorch",
+    layers_override: list[int] | None = None,
+    max_dims: int | None = 256,
+    max_samples: int | None = None,
+) -> list[Path]:
+    """Plot activation heatmaps for selected layers (samples x features)."""
+    backend_root = Path(
+        config["paths"]["outputs"]["pytorch_dir"]
+        if backend == "pytorch"
+        else config["paths"]["outputs"]["sklearn_dir"]
+    )
+    analysis_root = backend_root / "analysis_data"
+
+    selected_layers = layers_override or []
+    if not selected_layers:
+        for p in sorted(analysis_root.iterdir()):
+            if p.is_dir() and p.name.startswith("layer_"):
+                try:
+                    selected_layers.append(int(p.name.split("_", maxsplit=1)[1]))
+                except ValueError:
+                    continue
+        selected_layers = sorted(selected_layers)
+
+    if not selected_layers:
+        raise ValueError(f"No layer data found under {analysis_root}")
+
+    output_dir = Path(config["paths"]["outputs"]["plots_dir"]) / backend
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+
+    for layer in selected_layers:
+        layer_dir = analysis_root / f"layer_{layer}"
+        x_path = layer_dir / f"activations_layer_{layer}.npy"
+        y_path = layer_dir / "labels.npy"
+        if not x_path.exists() or not y_path.exists():
+            logger.warning("Skipping heatmap for layer %s, missing files.", layer)
+            continue
+
+        x = np.load(x_path).astype(np.float32)
+        y = np.load(y_path).reshape(-1)
+
+        # Sort by label (pivotal=1 first, non-pivotal=0 second)
+        order = np.argsort(-y)
+        x_sorted = x[order]
+
+        if max_samples is not None and x_sorted.shape[0] > max_samples:
+            step = max(1, x_sorted.shape[0] // max_samples)
+            idx = np.arange(0, x_sorted.shape[0], step)[:max_samples]
+            x_sorted = x_sorted[idx]
+
+        n_dims = x_sorted.shape[1]
+        if max_dims is not None and n_dims > max_dims:
+            step = max(1, n_dims // max_dims)
+            dim_idx = np.arange(0, n_dims, step)[:max_dims]
+            x_sorted = x_sorted[:, dim_idx]
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+        im = ax.imshow(x_sorted, aspect="auto", cmap="RdBu_r", interpolation="nearest")
+        ax.set_title(
+            f"Activation Heatmap | Layer {layer} | {backend} | "
+            f"{x_sorted.shape[0]} samples × {x_sorted.shape[1]} dims"
+        )
+        ax.set_xlabel("Hidden dimension")
+        ax.set_ylabel("Sample (sorted: pivotal → non-pivotal)")
+        plt.colorbar(im, ax=ax, label="Activation")
+        fig.tight_layout()
+
+        save_path = output_dir / f"layer_{layer}_heatmap.png"
+        fig.savefig(save_path)
+        plt.close(fig)
+        saved_paths.append(save_path)
+        logger.info("Saved activation heatmap to %s", save_path)
+
+    return saved_paths
+
+
+def plot_probe_weights(
+    config: dict[str, Any],
+    logger: Any,
+    backend: str = "pytorch",
+    layers_override: list[int] | None = None,
+    top_k: int | None = 64,
+) -> list[Path]:
+    """Plot probe weight magnitudes (which dimensions drive the probe)."""
+    backend_root = Path(
+        config["paths"]["outputs"]["pytorch_dir"]
+        if backend == "pytorch"
+        else config["paths"]["outputs"]["sklearn_dir"]
+    )
+    analysis_root = backend_root / "analysis_data"
+
+    selected_layers = layers_override or []
+    if not selected_layers:
+        for p in sorted(analysis_root.iterdir()):
+            if p.is_dir() and p.name.startswith("layer_"):
+                try:
+                    selected_layers.append(int(p.name.split("_", maxsplit=1)[1]))
+                except ValueError:
+                    continue
+        selected_layers = sorted(selected_layers)
+
+    if not selected_layers:
+        raise ValueError(f"No layer data found under {analysis_root}")
+
+    output_dir = Path(config["paths"]["outputs"]["plots_dir"]) / backend
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+
+    for layer in selected_layers:
+        layer_dir = analysis_root / f"layer_{layer}"
+        w_path = layer_dir / "probe_weights.npy"
+        if not w_path.exists():
+            logger.warning("Skipping probe weights for layer %s, missing file.", layer)
+            continue
+
+        w = np.load(w_path).astype(np.float32).flatten()
+        order = np.argsort(np.abs(w))[::-1]
+        w_sorted = w[order]
+        dims = np.arange(len(w_sorted))
+
+        k = top_k if top_k is not None else len(w)
+        k = min(k, len(w_sorted))
+        w_plot = w_sorted[:k]
+        dims_plot = dims[:k]
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        colors = np.where(w_plot >= 0, "steelblue", "coral")
+        ax.bar(dims_plot, w_plot, color=colors, alpha=0.8)
+        ax.axhline(0, color="black", linewidth=0.5)
+        ax.set_title(f"Probe Weights (top {k} by magnitude) | Layer {layer} | {backend}")
+        ax.set_xlabel("Dimension (sorted by |weight|)")
+        ax.set_ylabel("Weight")
+        fig.tight_layout()
+
+        save_path = output_dir / f"layer_{layer}_probe_weights.png"
+        fig.savefig(save_path)
+        plt.close(fig)
+        saved_paths.append(save_path)
+        logger.info("Saved probe weights plot to %s", save_path)
+
+    return saved_paths
+
+
+def plot_sample_correlation(
+    config: dict[str, Any],
+    logger: Any,
+    backend: str = "pytorch",
+    layers_override: list[int] | None = None,
+) -> tuple[list[Path], dict[int, dict[str, float]]]:
+    """Plot sample × sample correlation heatmap (cosine similarity), sorted by label.
+    Returns (saved_paths, separability_metrics per layer).
+    """
+    backend_root = Path(
+        config["paths"]["outputs"]["pytorch_dir"]
+        if backend == "pytorch"
+        else config["paths"]["outputs"]["sklearn_dir"]
+    )
+    analysis_root = backend_root / "analysis_data"
+
+    selected_layers = layers_override or []
+    if not selected_layers:
+        for p in sorted(analysis_root.iterdir()):
+            if p.is_dir() and p.name.startswith("layer_"):
+                try:
+                    selected_layers.append(int(p.name.split("_", maxsplit=1)[1]))
+                except ValueError:
+                    continue
+        selected_layers = sorted(selected_layers)
+
+    if not selected_layers:
+        raise ValueError(f"No layer data found under {analysis_root}")
+
+    output_dir = Path(config["paths"]["outputs"]["plots_dir"]) / backend
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+    separability_metrics: dict[int, dict[str, float]] = {}
+
+    for layer in selected_layers:
+        layer_dir = analysis_root / f"layer_{layer}"
+        x_path = layer_dir / f"activations_layer_{layer}.npy"
+        y_path = layer_dir / "labels.npy"
+        if not x_path.exists() or not y_path.exists():
+            logger.warning("Skipping sample correlation for layer %s, missing files.", layer)
+            continue
+
+        x = np.load(x_path).astype(np.float32)
+        y = np.load(y_path).reshape(-1)
+
+        # Cosine similarity: normalize rows, then X @ X.T
+        norms = np.linalg.norm(x, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        x_norm = x / norms
+        sim = x_norm @ x_norm.T
+
+        # Sort by label (pivotal=1 first)
+        order = np.argsort(-y)
+        sim_sorted = sim[order][:, order]
+        y_sorted = y[order]
+
+        n_pos = int((y_sorted >= 0.5).sum())
+        n_neg = len(y_sorted) - n_pos
+
+        # Quadrant indices (after sorting: pivotal 0..n_pos-1, non-pivotal n_pos..n-1)
+        # Intra pivotal: sim[0:n_pos, 0:n_pos], exclude diagonal
+        # Intra non-pivotal: sim[n_pos:, n_pos:], exclude diagonal
+        # Inter: sim[0:n_pos, n_pos:] and sim[n_pos:, 0:n_pos]
+
+        mask_pos = np.arange(len(y_sorted)) < n_pos
+        mask_neg = ~mask_pos
+
+        intra_pos_vals = sim_sorted[:n_pos, :n_pos][np.triu_indices(n_pos, k=1)]
+        intra_neg_vals = sim_sorted[n_pos:, n_pos:][np.triu_indices(n_neg, k=1)]
+        inter_vals = sim_sorted[:n_pos, n_pos:].flatten()
+
+        mean_intra_pos = float(np.mean(intra_pos_vals)) if len(intra_pos_vals) > 0 else 0.0
+        mean_intra_neg = float(np.mean(intra_neg_vals)) if len(intra_neg_vals) > 0 else 0.0
+        mean_inter = float(np.mean(inter_vals)) if len(inter_vals) > 0 else 0.0
+        mean_intra = float(np.mean(np.concatenate([intra_pos_vals, intra_neg_vals]))) if (len(intra_pos_vals) + len(intra_neg_vals)) > 0 else 0.0
+        separability_gap = mean_intra - mean_inter
+
+        separability_metrics[layer] = {
+            "mean_intra_pivotal": mean_intra_pos,
+            "mean_intra_nonpivotal": mean_intra_neg,
+            "mean_intra_overall": mean_intra,
+            "mean_inter": mean_inter,
+            "separability_gap": separability_gap,
+        }
+
+        fig, ax = plt.subplots(figsize=(8, 7))
+        im = ax.imshow(sim_sorted, aspect="auto", cmap="viridis", vmin=-1, vmax=1)
+        ax.axhline(n_pos - 0.5, color="white", linewidth=1)
+        ax.axvline(n_pos - 0.5, color="white", linewidth=1)
+        ax.set_title(
+            f"Sample Correlation (cosine) | Layer {layer} | {backend}\n"
+            f"Pivotal (top-left) vs Non-pivotal (bottom-right)"
+        )
+        ax.set_xlabel("Sample")
+        ax.set_ylabel("Sample")
+
+        textstr = (
+            f"Mean intra (pivotal): {mean_intra_pos:.3f}\n"
+            f"Mean intra (non-pivotal): {mean_intra_neg:.3f}\n"
+            f"Mean inter: {mean_inter:.3f}\n"
+            f"Separability gap: {separability_gap:.3f}"
+        )
+        props = dict(boxstyle="round", facecolor="wheat", alpha=0.9)
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=9, verticalalignment="top", bbox=props)
+
+        plt.colorbar(im, ax=ax, label="Cosine similarity")
+        fig.tight_layout()
+
+        save_path = output_dir / f"layer_{layer}_sample_correlation.png"
+        fig.savefig(save_path)
+        plt.close(fig)
+        saved_paths.append(save_path)
+        logger.info(
+            "Saved sample correlation plot to %s | intra=%.3f inter=%.3f gap=%.3f",
+            save_path,
+            mean_intra,
+            mean_inter,
+            separability_gap,
+        )
+
+    return saved_paths, separability_metrics
+
+
+def plot_centroid_difference(
+    config: dict[str, Any],
+    logger: Any,
+    backend: str = "pytorch",
+    layers_override: list[int] | None = None,
+    top_k: int | None = 64,
+) -> list[Path]:
+    """Plot centroid difference (mean_pivotal - mean_nonpivotal) per dimension."""
+    backend_root = Path(
+        config["paths"]["outputs"]["pytorch_dir"]
+        if backend == "pytorch"
+        else config["paths"]["outputs"]["sklearn_dir"]
+    )
+    analysis_root = backend_root / "analysis_data"
+
+    selected_layers = layers_override or []
+    if not selected_layers:
+        for p in sorted(analysis_root.iterdir()):
+            if p.is_dir() and p.name.startswith("layer_"):
+                try:
+                    selected_layers.append(int(p.name.split("_", maxsplit=1)[1]))
+                except ValueError:
+                    continue
+        selected_layers = sorted(selected_layers)
+
+    if not selected_layers:
+        raise ValueError(f"No layer data found under {analysis_root}")
+
+    output_dir = Path(config["paths"]["outputs"]["plots_dir"]) / backend
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+
+    for layer in selected_layers:
+        layer_dir = analysis_root / f"layer_{layer}"
+        x_path = layer_dir / f"activations_layer_{layer}.npy"
+        y_path = layer_dir / "labels.npy"
+        if not x_path.exists() or not y_path.exists():
+            logger.warning("Skipping centroid difference for layer %s, missing files.", layer)
+            continue
+
+        x = np.load(x_path).astype(np.float32)
+        y = np.load(y_path).reshape(-1)
+
+        mask_pos = y >= 0.5
+        mask_neg = y < 0.5
+        mu_pos = x[mask_pos].mean(axis=0)
+        mu_neg = x[mask_neg].mean(axis=0)
+        diff = mu_pos - mu_neg
+
+        order = np.argsort(np.abs(diff))[::-1]
+        diff_sorted = diff[order]
+        dims = np.arange(len(diff_sorted))
+
+        k = top_k if top_k is not None else len(diff)
+        k = min(k, len(diff_sorted))
+        diff_plot = diff_sorted[:k]
+        dims_plot = dims[:k]
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        colors = np.where(diff_plot >= 0, "steelblue", "coral")
+        ax.bar(dims_plot, diff_plot, color=colors, alpha=0.8)
+        ax.axhline(0, color="black", linewidth=0.5)
+        ax.set_title(f"Centroid Difference (pivotal − non-pivotal) | Layer {layer} | {backend} | top {k} dims")
+        ax.set_xlabel("Dimension (sorted by |diff|)")
+        ax.set_ylabel("Difference")
+        fig.tight_layout()
+
+        save_path = output_dir / f"layer_{layer}_centroid_difference.png"
+        fig.savefig(save_path)
+        plt.close(fig)
+        saved_paths.append(save_path)
+        logger.info("Saved centroid difference plot to %s", save_path)
+
+    return saved_paths
+
+
+def plot_probe_analysis(
+    config: dict[str, Any],
+    logger: Any,
+    backend: str = "pytorch",
+    layers_override: list[int] | None = None,
+    top_k: int | None = 64,
+) -> list[Path]:
+    """Plot probe weights, sample correlation, and centroid difference for selected layers."""
+    paths: list[Path] = []
+    paths.extend(
+        plot_probe_weights(config, logger, backend=backend, layers_override=layers_override, top_k=top_k)
+    )
+    corr_paths, separability_metrics = plot_sample_correlation(
+        config, logger, backend=backend, layers_override=layers_override
+    )
+    paths.extend(corr_paths)
+
+    # Save separability metrics to JSON
+    backend_root = Path(
+        config["paths"]["outputs"]["pytorch_dir"]
+        if backend == "pytorch"
+        else config["paths"]["outputs"]["sklearn_dir"]
+    )
+    metrics_dir = backend_root / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    if separability_metrics:
+        with (metrics_dir / "separability_metrics.json").open("w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in separability_metrics.items()}, f, indent=2)
+        logger.info("Saved separability metrics to %s", metrics_dir / "separability_metrics.json")
+
+    paths.extend(
+        plot_centroid_difference(config, logger, backend=backend, layers_override=layers_override, top_k=top_k)
+    )
+    return paths
+
+
 def plot_confusion_matrices(
     config: dict[str, Any],
     logger: Any,
