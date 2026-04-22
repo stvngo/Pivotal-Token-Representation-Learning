@@ -1,0 +1,11 @@
+{
+  "backend": "sklearn",
+  "layer": 14,
+  "vector_type": "centroid_diff",
+  "factors": [
+    1.2
+  ],
+  "hidden_dim": 1024,
+  "vector_norm": 9.59367561340332,
+  "vector_path": "steering_layer14_vector.npy"
+}
