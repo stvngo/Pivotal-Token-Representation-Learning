@@ -47,7 +47,7 @@ def run_gsm8k_evaluation(
     config: dict[str, Any],
     logger: Any,
     max_examples: int = 200,
-    split: str = "validation",
+    split: str = "test",
     seed: int | None = None,
     steering_config_path: Path | None = None,
     steering_factor: float | None = None,
@@ -155,7 +155,7 @@ def run_gsm8k_comparison(
     config: dict[str, Any],
     logger: Any,
     max_examples: int = 200,
-    split: str = "validation",
+    split: str = "test",
     steering_config_path: Path | None = None,
     factors: list[float] | None = None,
     output_dir: Path | None = None,
@@ -246,7 +246,7 @@ def run_error_analysis(
         accuracies.append(correct / len(res) * 100 if res else 0)
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    sns.barplot(x=names, y=accuracies, ax=ax, palette="viridis")
+    sns.barplot(x=names, y=accuracies, hue=names, ax=ax, palette="viridis", legend=False)
     ax.set_ylabel("Accuracy (%)")
     ax.set_title("GSM8K Accuracy: Base vs Steered Models")
     ax.set_ylim(0, 100)

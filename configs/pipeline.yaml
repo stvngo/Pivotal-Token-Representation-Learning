@@ -26,7 +26,7 @@ steering:
 
 evaluation:
   gsm8k_max_examples: 200
-  gsm8k_split: validation
+  gsm8k_split: test
   max_new_tokens: 256
   temperature: 0.6
 

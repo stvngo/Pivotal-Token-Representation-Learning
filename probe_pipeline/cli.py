@@ -223,7 +223,7 @@ def _run_eval_gsm8k(config: dict[str, Any], args: argparse.Namespace, logger: An
 
     output_dir = Path(config["paths"]["outputs"].get("gsm8k_eval_dir", str(backend_root.parent / "gsm8k_eval")))
 
-    split = eval_cfg.get("gsm8k_split", "validation")
+    split = eval_cfg.get("gsm8k_split", "test")
     result = run_gsm8k_comparison(
         config=config,
         logger=logger,
