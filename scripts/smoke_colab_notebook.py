@@ -1,18 +1,22 @@
-"""Short smoke test for the Colab notebook pipeline.
+"""Short smoke test for the Colab notebook pipelines.
 
-Exercises the same code paths as `notebooks/steering_gsm8k_colab.ipynb`
-(probe loading, steering hook, GSM8K generate + parse, metrics, plotting,
-state-save) on a trivially small workload so we can verify correctness in
-~1-2 minutes instead of ~1 hour.
+Exercises the distinct code paths behind each notebook in ``notebooks/`` on a
+trivially small workload so we can verify correctness in ~1-2 minutes per
+variant instead of the full Colab run. Pick a variant with ``--variant``:
+
+    main                 notebooks/steering_gsm8k_colab.ipynb
+    random_control       notebooks/steering_random_control.ipynb
+    greedy               notebooks/steering_greedy_decode.ipynb
+    layer_sweep          notebooks/steering_layer_sweep.ipynb
+    additive             notebooks/steering_additive_multilayer.ipynb
+    codelion             notebooks/codelion_steering_vectors.ipynb
+    all                  run every variant sequentially
 
 Usage:
-    python scripts/smoke_colab_notebook.py --max-examples 2 --factor 1.4
+    python scripts/smoke_colab_notebook.py --variant main --max-examples 2
+    python scripts/smoke_colab_notebook.py --variant all --max-examples 2
 
-Successful run writes:
-    artifacts/smoke/nb_results/base_*.json
-    artifacts/smoke/nb_results/steered_1.4_*.json
-    artifacts/smoke/nb_results/summaries.json
-    artifacts/smoke/nb_results/accuracy_f1_vs_factor.png
+Successful runs write to ``artifacts/smoke/<variant>/``.
 """
 
 from __future__ import annotations
@@ -30,8 +34,10 @@ import torch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+VARIANTS = ("main", "random_control", "greedy", "layer_sweep", "additive", "codelion")
 
 
+# --------------------------------------------------------------------------- shared helpers
 def _seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -71,13 +77,8 @@ def compute_metrics(results):
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    return {
-        "accuracy": correct / n,
-        "f1": f1,
-        "parse_rate": parsed / n,
-        "correct": correct,
-        "n": n,
-    }
+    return {"accuracy": correct / n, "f1": f1, "parse_rate": parsed / n,
+            "correct": correct, "n": n}
 
 
 def _get_decoder_layer(model, layer_idx: int):
@@ -101,8 +102,313 @@ def _make_hook(vector: torch.Tensor, strength: float):
     return hook
 
 
+def _register_steering(model, layer, vec, strength):
+    return [_get_decoder_layer(model, layer).register_forward_hook(_make_hook(vec, strength))]
+
+
+def _register_additive(model, injections):
+    handles = []
+    for layer, vec, strength in injections:
+        handles.append(
+            _get_decoder_layer(model, layer).register_forward_hook(_make_hook(vec, strength))
+        )
+    return handles
+
+
+def _remove(handles):
+    for h in handles:
+        h.remove()
+
+
+# --------------------------------------------------------------------------- device / model / probe
+
+
+def pick_device():
+    if torch.cuda.is_available():
+        return "cuda", torch.bfloat16
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps", torch.float32
+    return "cpu", torch.float32
+
+
+def load_probe(probe_dir: Path, layer: int):
+    cfg_path = probe_dir / f"steering_layer{layer}.json"
+    vec_path = probe_dir / f"steering_layer{layer}_vector.npy"
+    if not (cfg_path.exists() and vec_path.exists()):
+        raise FileNotFoundError(f"probe files missing at {cfg_path}, {vec_path}")
+    cfg = json.loads(cfg_path.read_text())
+    vec = np.load(vec_path).astype(np.float32)
+    return cfg, vec, cfg_path, vec_path
+
+
+def load_model(model_name, device, dtype):
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, torch_dtype=dtype, trust_remote_code=True, low_cpu_mem_usage=True,
+    ).to(device)
+    model.eval()
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    return tokenizer, model
+
+
+def load_examples(max_examples, seed):
+    from datasets import load_dataset
+    ds_full = load_dataset("openai/gsm8k", "main", split="test")
+    rng = np.random.default_rng(seed)
+    idxs = sorted(rng.choice(len(ds_full), size=min(max_examples, len(ds_full)), replace=False).tolist())
+    subset = ds_full.select(idxs)
+    return [
+        {"question": r["question"], "ground_truth": extract_gsm8k_answer(r["answer"])}
+        for r in subset
+    ]
+
+
+# --------------------------------------------------------------------------- generator closure
+
+
+def make_generator(model, tokenizer, device, max_new_tokens, do_sample=True,
+                   temperature=0.6, top_p=0.9):
+    def generate_once(prompt: str) -> str:
+        enc = tokenizer(prompt, return_tensors="pt", add_special_tokens=True).to(device)
+        with torch.no_grad():
+            gen_kwargs = dict(max_new_tokens=max_new_tokens,
+                              pad_token_id=tokenizer.pad_token_id)
+            if do_sample:
+                gen_kwargs.update(do_sample=True, temperature=temperature, top_p=top_p)
+            else:
+                gen_kwargs.update(do_sample=False)
+            out = model.generate(**enc, **gen_kwargs)
+        return tokenizer.decode(out[0], skip_special_tokens=True)
+    return generate_once
+
+
+def run_once(generate_once, examples, register_fn, label, seed):
+    _seed(seed)
+    handles = register_fn() if register_fn is not None else []
+    results = []
+    try:
+        for i, ex in enumerate(examples):
+            prompt = f"Question: {ex['question']}\n\nLet's think step by step.\n\n"
+            text = generate_once(prompt)
+            pred = extract_gsm8k_answer(text)
+            ok = is_correct(pred, ex["ground_truth"])
+            results.append({"idx": i, "question": ex["question"],
+                            "ground_truth": ex["ground_truth"],
+                            "predicted": pred, "correct": ok,
+                            "full_output": text[-800:]})
+            print(f"[smoke]   {label} #{i}: gt={ex['ground_truth']} pred={pred} correct={ok}")
+    finally:
+        _remove(handles)
+    return results, compute_metrics(results)
+
+
+def save_run(out_dir: Path, label, results, metrics, extra=None):
+    (out_dir / f"{label}_results.json").write_text(json.dumps(results, indent=2))
+    (out_dir / f"{label}_generations.txt").write_text(
+        "\n\n====\n\n".join(
+            f"[{r['idx']}] gt={r['ground_truth']} pred={r['predicted']} correct={r['correct']}\n{r['full_output']}"
+            for r in results
+        )
+    )
+    state = {"label": label, "metrics": metrics}
+    if extra:
+        state.update(extra)
+    (out_dir / f"{label}_state.json").write_text(json.dumps(state, indent=2))
+
+
+# --------------------------------------------------------------------------- variant runners
+
+
+def run_variant_main(args, out_dir, device, dtype, probe_dir):
+    cfg, vec, _, vec_path = load_probe(probe_dir, args.layer)
+    vec_tensor = torch.from_numpy(vec).to(torch.float32)
+    tokenizer, model = load_model(args.model, device, dtype)
+    assert vec.shape[0] == model.config.hidden_size
+    examples = load_examples(args.max_examples, args.seed)
+    gen = make_generator(model, tokenizer, device, args.max_new_tokens, do_sample=True)
+
+    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
+    save_run(out_dir, "base", base_res, base_met)
+
+    label = f"steered_{args.factor}"
+    strength = args.factor - 1.0
+    res, met = run_once(
+        gen, examples,
+        lambda: _register_steering(model, args.layer, vec_tensor, strength),
+        label, args.seed,
+    )
+    save_run(out_dir, label, res, met, extra={"factor": args.factor, "strength": strength})
+    print(f"[smoke/main] base={base_met['accuracy']:.3f} {label}={met['accuracy']:.3f}")
+
+
+def run_variant_random_control(args, out_dir, device, dtype, probe_dir):
+    cfg, vec, _, _ = load_probe(probe_dir, args.layer)
+    piv_tensor = torch.from_numpy(vec).to(torch.float32)
+    piv_norm = float(piv_tensor.norm().item())
+
+    g = torch.Generator().manual_seed(101)
+    r = torch.randn(vec.shape[0], generator=g, dtype=torch.float32)
+    r = r * (piv_norm / r.norm().item())
+
+    tokenizer, model = load_model(args.model, device, dtype)
+    examples = load_examples(args.max_examples, args.seed)
+    gen = make_generator(model, tokenizer, device, args.max_new_tokens)
+
+    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
+    save_run(out_dir, "base", base_res, base_met)
+
+    strength = args.factor - 1.0
+    piv_res, piv_met = run_once(
+        gen, examples,
+        lambda: _register_steering(model, args.layer, piv_tensor, strength),
+        "pivotal", args.seed,
+    )
+    save_run(out_dir, "pivotal", piv_res, piv_met)
+    rand_res, rand_met = run_once(
+        gen, examples,
+        lambda: _register_steering(model, args.layer, r, strength),
+        "random101", args.seed,
+    )
+    save_run(out_dir, "random101", rand_res, rand_met)
+    print(f"[smoke/random_control] base={base_met['accuracy']:.3f} "
+          f"pivotal={piv_met['accuracy']:.3f} random={rand_met['accuracy']:.3f}")
+
+
+def run_variant_greedy(args, out_dir, device, dtype, probe_dir):
+    cfg, vec, _, _ = load_probe(probe_dir, args.layer)
+    vec_tensor = torch.from_numpy(vec).to(torch.float32)
+    tokenizer, model = load_model(args.model, device, dtype)
+    examples = load_examples(args.max_examples, args.seed)
+    gen = make_generator(model, tokenizer, device, args.max_new_tokens, do_sample=False)
+
+    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
+    save_run(out_dir, "base", base_res, base_met, extra={"decoding": "greedy"})
+
+    strength = args.factor - 1.0
+    res, met = run_once(
+        gen, examples,
+        lambda: _register_steering(model, args.layer, vec_tensor, strength),
+        f"steered_{args.factor}", args.seed,
+    )
+    save_run(out_dir, f"steered_{args.factor}", res, met, extra={"decoding": "greedy"})
+    print(f"[smoke/greedy] base={base_met['accuracy']:.3f} steered={met['accuracy']:.3f}")
+
+
+def run_variant_layer_sweep(args, out_dir, device, dtype, probe_dir):
+    # Only use layers that are actually present locally (skips layer 8 if missing).
+    layers = []
+    for L in (8, 14, 16):
+        if (probe_dir / f"steering_layer{L}.json").exists():
+            layers.append(L)
+    if not layers:
+        raise RuntimeError("no probe layers available for smoke test")
+    probes = {L: load_probe(probe_dir, L) for L in layers}
+
+    tokenizer, model = load_model(args.model, device, dtype)
+    examples = load_examples(args.max_examples, args.seed)
+    gen = make_generator(model, tokenizer, device, args.max_new_tokens)
+
+    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
+    save_run(out_dir, "base", base_res, base_met)
+
+    for L in layers:
+        cfg, vec, _, _ = probes[L]
+        vec_tensor = torch.from_numpy(vec).to(torch.float32)
+        label = f"L{L}_f{args.factor}"
+        strength = args.factor - 1.0
+        res, met = run_once(
+            gen, examples,
+            lambda l=L, v=vec_tensor, s=strength: _register_steering(model, l, v, s),
+            label, args.seed,
+        )
+        save_run(out_dir, label, res, met, extra={"layer": L, "factor": args.factor})
+        print(f"[smoke/layer_sweep] L{L}: {met['accuracy']:.3f}")
+
+
+def run_variant_additive(args, out_dir, device, dtype, probe_dir):
+    present = [L for L in (14, 16, 20) if (probe_dir / f"steering_layer{L}.json").exists()]
+    assert len(present) >= 2, "need at least 2 probe layers for additive smoke"
+    vecs = {}
+    for L in present:
+        cfg, v, _, _ = load_probe(probe_dir, L)
+        vecs[L] = torch.from_numpy(v).to(torch.float32)
+
+    tokenizer, model = load_model(args.model, device, dtype)
+    examples = load_examples(args.max_examples, args.seed)
+    gen = make_generator(model, tokenizer, device, args.max_new_tokens)
+
+    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
+    save_run(out_dir, "base", base_res, base_met)
+
+    spec = [(present[0], vecs[present[0]], 0.2), (present[1], vecs[present[1]], 0.2)]
+    res, met = run_once(
+        gen, examples,
+        lambda: _register_additive(model, spec),
+        "multi_layer_additive", args.seed,
+    )
+    save_run(out_dir, "multi_layer_additive", res, met,
+             extra={"injections": [(L, float(s)) for L, _, s in spec]})
+    print(f"[smoke/additive] base={base_met['accuracy']:.3f} additive={met['accuracy']:.3f}")
+
+
+def run_variant_codelion(args, out_dir, device, dtype, probe_dir):
+    from datasets import load_dataset
+    ds = load_dataset("codelion/Qwen3-0.6B-pts-steering-vectors", split="train[:32]")
+    df = ds.to_pandas()
+    print(f"[smoke/codelion] loaded {len(df)} rows, cols={list(df.columns)[:8]}...")
+
+    df["steering_vector"] = df["steering_vector"].map(lambda x: np.asarray(x, dtype=np.float32))
+    df["abs_prob_delta"] = df["prob_delta"].abs()
+
+    V = np.stack(df["steering_vector"].values)
+    mean_vec = V.mean(axis=0).astype(np.float32)
+    top1_vec = V[int(df["abs_prob_delta"].idxmax())].astype(np.float32)
+    # Norm-match top1 to mean.
+    top1_vec = top1_vec * (np.linalg.norm(mean_vec) / max(1e-8, float(np.linalg.norm(top1_vec))))
+
+    mean_tensor = torch.from_numpy(mean_vec).to(torch.float32)
+    top1_tensor = torch.from_numpy(top1_vec).to(torch.float32)
+
+    tokenizer, model = load_model(args.model, device, dtype)
+    assert V.shape[1] == model.config.hidden_size, (
+        f"codelion hidden_dim {V.shape[1]} != model hidden_size {model.config.hidden_size}"
+    )
+
+    examples = load_examples(args.max_examples, args.seed)
+    gen = make_generator(model, tokenizer, device, args.max_new_tokens)
+
+    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
+    save_run(out_dir, "base", base_res, base_met)
+
+    strength = args.factor - 1.0
+    for label, tensor in (("mean", mean_tensor), ("top1", top1_tensor)):
+        res, met = run_once(
+            gen, examples,
+            lambda t=tensor, s=strength: _register_steering(model, args.layer, t, s),
+            label, args.seed,
+        )
+        save_run(out_dir, label, res, met, extra={"arm": label, "factor": args.factor})
+        print(f"[smoke/codelion] {label}: {met['accuracy']:.3f}")
+
+
+RUNNERS = {
+    "main": run_variant_main,
+    "random_control": run_variant_random_control,
+    "greedy": run_variant_greedy,
+    "layer_sweep": run_variant_layer_sweep,
+    "additive": run_variant_additive,
+    "codelion": run_variant_codelion,
+}
+
+
+# --------------------------------------------------------------------------- entrypoint
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--variant", default="main", choices=(*VARIANTS, "all"))
     ap.add_argument("--max-examples", type=int, default=2)
     ap.add_argument("--factor", type=float, default=1.4)
     ap.add_argument("--layer", type=int, default=14)
@@ -114,193 +420,38 @@ def main() -> int:
         default=str(REPO_ROOT / "artifacts/cached3/sklearn/steering_configs"),
     )
     ap.add_argument(
-        "--out-dir",
-        default=str(REPO_ROOT / "artifacts/smoke/nb_results"),
+        "--out-root",
+        default=str(REPO_ROOT / "artifacts/smoke"),
     )
     args = ap.parse_args()
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    _seed(args.seed)
-
-    if torch.cuda.is_available():
-        device, dtype = "cuda", torch.bfloat16
-    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        device, dtype = "mps", torch.float32
-    else:
-        device, dtype = "cpu", torch.float32
+    device, dtype = pick_device()
     print(f"[smoke] device={device} dtype={dtype}")
 
-    # ------------------------------------------------------------ probe
-    probe_dir = Path(args.probe_dir)
-    cfg_path = probe_dir / f"steering_layer{args.layer}.json"
-    vec_path = probe_dir / f"steering_layer{args.layer}_vector.npy"
-    if not cfg_path.exists() or not vec_path.exists():
-        print(f"[smoke] FAIL: probe files missing in {probe_dir}")
-        return 2
-    steering_cfg = json.loads(cfg_path.read_text())
-    steering_vector = np.load(vec_path).astype(np.float32)
-    vec_tensor = torch.from_numpy(steering_vector).to(torch.float32)
-    print(
-        f"[smoke] probe: layer={steering_cfg['layer']} "
-        f"hidden_dim={steering_cfg['hidden_dim']} "
-        f"norm={steering_cfg['vector_norm']:.3f}"
-    )
-
-    # ------------------------------------------------------------ parser
+    # Parser inline sanity check (runs regardless of variant).
     assert extract_gsm8k_answer("#### 42") == "42"
     assert is_correct("3.0", "3") is True
-    print("[smoke] parser inline-asserts OK")
+    assert compute_metrics([])["accuracy"] == 0.0
+    print("[smoke] parser sanity OK")
 
-    # ------------------------------------------------------------ model
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    variants = VARIANTS if args.variant == "all" else (args.variant,)
+    probe_dir = Path(args.probe_dir)
+    out_root = Path(args.out_root)
 
-    t0 = time.time()
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        torch_dtype=dtype,
-        trust_remote_code=True,
-        low_cpu_mem_usage=True,
-    ).to(device)
-    model.eval()
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-    print(f"[smoke] loaded {args.model} in {time.time() - t0:.1f}s")
-    assert steering_vector.shape[0] == model.config.hidden_size
-
-    # ------------------------------------------------------------ data
-    from datasets import load_dataset
-    ds_full = load_dataset("openai/gsm8k", "main", split="test")
-    rng = np.random.default_rng(args.seed)
-    idxs = sorted(
-        rng.choice(len(ds_full), size=min(args.max_examples, len(ds_full)), replace=False).tolist()
-    )
-    subset = ds_full.select(idxs)
-    examples = [
-        {
-            "question": r["question"],
-            "ground_truth": extract_gsm8k_answer(r["answer"]),
-        }
-        for r in subset
-    ]
-    print(f"[smoke] sampled {len(examples)} GSM8K examples")
-
-    # ------------------------------------------------------------ generate helper
-    def generate_once(prompt: str) -> str:
-        enc = tokenizer(prompt, return_tensors="pt", add_special_tokens=True).to(device)
-        with torch.no_grad():
-            out = model.generate(
-                **enc,
-                max_new_tokens=args.max_new_tokens,
-                do_sample=True,
-                temperature=0.6,
-                top_p=0.9,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        return tokenizer.decode(out[0], skip_special_tokens=True)
-
-    def evaluate(label, strength):
+    for v in variants:
+        t0 = time.time()
+        out_dir = out_root / v
+        out_dir.mkdir(parents=True, exist_ok=True)
         _seed(args.seed)
-        handles = []
-        if strength is not None:
-            handles = [
-                _get_decoder_layer(model, args.layer).register_forward_hook(
-                    _make_hook(vec_tensor, strength)
-                )
-            ]
-        results = []
+        print(f"\n[smoke] ==== variant: {v} ====")
         try:
-            for i, ex in enumerate(examples):
-                prompt = f"Question: {ex['question']}\n\nLet's think step by step.\n\n"
-                text = generate_once(prompt)
-                pred = extract_gsm8k_answer(text)
-                ok = is_correct(pred, ex["ground_truth"])
-                results.append({
-                    "idx": i,
-                    "question": ex["question"],
-                    "ground_truth": ex["ground_truth"],
-                    "predicted": pred,
-                    "correct": ok,
-                    "full_output": text[-800:],
-                })
-                print(
-                    f"[smoke]   {label} #{i}: gt={ex['ground_truth']} "
-                    f"pred={pred} correct={ok}"
-                )
-        finally:
-            for h in handles:
-                h.remove()
-        return results, compute_metrics(results)
+            RUNNERS[v](args, out_dir, device, dtype, probe_dir)
+        except Exception as exc:
+            print(f"[smoke] variant {v} FAILED: {exc}")
+            return 2
+        print(f"[smoke] variant {v} OK in {time.time() - t0:.1f}s -> {out_dir}")
 
-    def save_run(label, results, metrics, extra=None):
-        (out_dir / f"{label}_results.json").write_text(json.dumps(results, indent=2))
-        (out_dir / f"{label}_generations.txt").write_text(
-            "\n\n====\n\n".join(
-                f"[{r['idx']}] gt={r['ground_truth']} pred={r['predicted']} correct={r['correct']}\n{r['full_output']}"
-                for r in results
-            )
-        )
-        state = {
-            "label": label,
-            "model": args.model,
-            "layer": args.layer,
-            "seed": args.seed,
-            "max_examples": args.max_examples,
-            "max_new_tokens": args.max_new_tokens,
-            "device": device,
-            "metrics": metrics,
-        }
-        if extra:
-            state.update(extra)
-        (out_dir / f"{label}_state.json").write_text(json.dumps(state, indent=2))
-
-    # ------------------------------------------------------------ base
-    base_res, base_met = evaluate("base", strength=None)
-    save_run("base", base_res, base_met)
-    print(
-        f"[smoke] base: acc={base_met['accuracy']:.3f} "
-        f"f1={base_met['f1']:.3f} parse={base_met['parse_rate']:.3f}"
-    )
-
-    # ------------------------------------------------------------ steered
-    label = f"steered_{args.factor}"
-    strength = args.factor - 1.0
-    steered_res, steered_met = evaluate(label, strength=strength)
-    save_run(label, steered_res, steered_met, extra={
-        "factor": args.factor,
-        "strength": strength,
-        "vector_type": steering_cfg["vector_type"],
-        "vector_norm": steering_cfg["vector_norm"],
-        "vector_path": vec_path.name,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-    })
-    print(
-        f"[smoke] {label}: acc={steered_met['accuracy']:.3f} "
-        f"f1={steered_met['f1']:.3f} parse={steered_met['parse_rate']:.3f}"
-    )
-
-    # ------------------------------------------------------------ aggregate + tiny plot
-    all_metrics = {"base": base_met, label: steered_met}
-    (out_dir / "summaries.json").write_text(json.dumps(all_metrics, indent=2))
-
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(5, 3.5))
-    names = list(all_metrics.keys())
-    ax.bar(names, [all_metrics[n]["accuracy"] for n in names], color=["#888", "#4c72b0"])
-    ax.set_ylim(0, 1.05)
-    ax.set_ylabel("Accuracy")
-    ax.set_title("Smoke: base vs steered")
-    fig.tight_layout()
-    fig.savefig(out_dir / "accuracy_f1_vs_factor.png")
-    plt.close(fig)
-
-    print(f"[smoke] wrote artifacts to {out_dir}")
-    print("[smoke] OK")
+    print("\n[smoke] all done.")
     return 0
 
 
