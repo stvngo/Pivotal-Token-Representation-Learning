@@ -365,7 +365,6 @@ def run_variant_codelion(args, out_dir, device, dtype, probe_dir):
     V = np.stack(df["steering_vector"].values)
     mean_vec = V.mean(axis=0).astype(np.float32)
     top1_vec = V[int(df["abs_prob_delta"].idxmax())].astype(np.float32)
-    # Norm-match top1 to mean.
     top1_vec = top1_vec * (np.linalg.norm(mean_vec) / max(1e-8, float(np.linalg.norm(top1_vec))))
 
     mean_tensor = torch.from_numpy(mean_vec).to(torch.float32)
@@ -375,6 +374,9 @@ def run_variant_codelion(args, out_dir, device, dtype, probe_dir):
     assert V.shape[1] == model.config.hidden_size, (
         f"codelion hidden_dim {V.shape[1]} != model hidden_size {model.config.hidden_size}"
     )
+
+    # Codelion PTS extracts at layers 19/23/27 on Qwen3-0.6B; optillm autothink's default is 19.
+    codelion_layer = 19 if args.layer == 14 else args.layer
 
     examples = load_examples(args.max_examples, args.seed)
     gen = make_generator(model, tokenizer, device, args.max_new_tokens)
@@ -386,11 +388,11 @@ def run_variant_codelion(args, out_dir, device, dtype, probe_dir):
     for label, tensor in (("mean", mean_tensor), ("top1", top1_tensor)):
         res, met = run_once(
             gen, examples,
-            lambda t=tensor, s=strength: _register_steering(model, args.layer, t, s),
+            lambda t=tensor, s=strength, l=codelion_layer: _register_steering(model, l, t, s),
             label, args.seed,
         )
-        save_run(out_dir, label, res, met, extra={"arm": label, "factor": args.factor})
-        print(f"[smoke/codelion] {label}: {met['accuracy']:.3f}")
+        save_run(out_dir, label, res, met, extra={"arm": label, "factor": args.factor, "layer": codelion_layer})
+        print(f"[smoke/codelion] {label} @ layer {codelion_layer}: {met['accuracy']:.3f}")
 
 
 RUNNERS = {
