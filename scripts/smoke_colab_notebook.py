@@ -423,11 +423,21 @@ def run_variant_codelion(args, out_dir, device, dtype, probe_dir):
 
 
 def _load_probe_weights(repo_root: Path, layer: int) -> np.ndarray:
-    """Load probe-weight vector saved by sklearn training (one row per class)."""
-    p = repo_root / f"artifacts/cached3/sklearn/analysis_data/layer_{layer}/probe_weights.npy"
-    if not p.exists():
-        raise FileNotFoundError(f"probe_weights file missing at {p}")
-    return np.load(p).astype(np.float32).reshape(-1)
+    """Load probe-weight vector. Accepts either the tracked steering_configs/
+    layout (preferred, also what GitHub serves) or the raw analysis_data/
+    output of probe_pipeline."""
+    candidates = [
+        repo_root / "artifacts/cached3/sklearn/steering_configs"
+        / f"steering_layer{layer}_probe_weights.npy",
+        repo_root / "artifacts/cached3/sklearn/analysis_data"
+        / f"layer_{layer}" / "probe_weights.npy",
+    ]
+    for p in candidates:
+        if p.exists():
+            return np.load(p).astype(np.float32).reshape(-1)
+    raise FileNotFoundError(
+        f"probe_weights file missing; tried {[str(c) for c in candidates]}"
+    )
 
 
 def run_variant_probe_weights(args, out_dir, device, dtype, probe_dir):
