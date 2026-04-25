@@ -10,6 +10,7 @@ variant instead of the full Colab run. Pick a variant with ``--variant``:
     layer_sweep          notebooks/steering_layer_sweep.ipynb
     additive             notebooks/steering_additive_multilayer.ipynb
     codelion             notebooks/codelion_steering_vectors.ipynb
+    probe_weights        notebooks/steering_probe_weights.ipynb
     all                  run every variant sequentially
 
 Usage:
@@ -34,7 +35,8 @@ import torch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-VARIANTS = ("main", "random_control", "greedy", "layer_sweep", "additive", "codelion")
+VARIANTS = ("main", "random_control", "greedy", "layer_sweep", "additive", "codelion",
+            "probe_weights")
 
 
 # --------------------------------------------------------------------------- shared helpers
@@ -113,6 +115,31 @@ def _register_additive(model, injections):
             _get_decoder_layer(model, layer).register_forward_hook(_make_hook(vec, strength))
         )
     return handles
+
+
+def _make_projection_hook(unit_vec: torch.Tensor, alpha: float):
+    """h_new = h + (alpha - 1) * (h . v_hat) * v_hat. Scales only the component
+    along the probe direction; alpha=1 is identity, alpha=0 ablates."""
+    def hook(module, args, output):
+        hidden = output[0] if isinstance(output, tuple) else output
+        vh = unit_vec.to(hidden.device).to(hidden.dtype)
+        if vh.dim() == 1:
+            vh_b = vh.view(1, 1, -1)
+        else:
+            vh_b = vh
+        proj_scalar = (hidden * vh_b).sum(dim=-1, keepdim=True)
+        proj_vec = proj_scalar * vh_b
+        delta = (alpha - 1.0) * proj_vec
+        if isinstance(output, tuple):
+            return (hidden + delta,) + output[1:]
+        return hidden + delta
+    return hook
+
+
+def _register_projection(model, layer: int, unit_vec: torch.Tensor, alpha: float):
+    return [_get_decoder_layer(model, layer).register_forward_hook(
+        _make_projection_hook(unit_vec, alpha)
+    )]
 
 
 def _remove(handles):
@@ -395,6 +422,81 @@ def run_variant_codelion(args, out_dir, device, dtype, probe_dir):
         print(f"[smoke/codelion] {label} @ layer {codelion_layer}: {met['accuracy']:.3f}")
 
 
+def _load_probe_weights(repo_root: Path, layer: int) -> np.ndarray:
+    """Load probe-weight vector saved by sklearn training (one row per class)."""
+    p = repo_root / f"artifacts/cached3/sklearn/analysis_data/layer_{layer}/probe_weights.npy"
+    if not p.exists():
+        raise FileNotFoundError(f"probe_weights file missing at {p}")
+    return np.load(p).astype(np.float32).reshape(-1)
+
+
+def run_variant_probe_weights(args, out_dir, device, dtype, probe_dir):
+    """Smoke test for notebooks/steering_probe_weights.ipynb. Exercises BOTH
+    additive (h + alpha*w) and projection-scaling (h + (alpha-1)*proj_w(h)) on
+    n examples each."""
+    w = _load_probe_weights(REPO_ROOT, args.layer)
+    w_norm = float(np.linalg.norm(w))
+    w_tensor = torch.from_numpy(w).to(torch.float32)
+    v_hat = w / max(1e-12, w_norm)
+    v_hat_tensor = torch.from_numpy(v_hat).to(torch.float32)
+
+    # Sanity: cosine vs centroid-diff direction (if available locally).
+    cd_path = probe_dir / f"steering_layer{args.layer}_vector.npy"
+    if cd_path.exists():
+        cd = np.load(cd_path).astype(np.float32).reshape(-1)
+        cos = float(np.dot(w, cd) / max(1e-12, np.linalg.norm(w) * np.linalg.norm(cd)))
+        print(f"[smoke/probe_weights] cos(probe_weights, centroid_diff) = {cos:+.4f}")
+
+    tokenizer, model = load_model(args.model, device, dtype)
+    assert w.shape[0] == model.config.hidden_size, (
+        f"probe-weights dim {w.shape[0]} != hidden_size {model.config.hidden_size}"
+    )
+
+    examples = load_examples(args.max_examples, args.seed)
+    gen = make_generator(model, tokenizer, device, args.max_new_tokens)
+
+    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
+    save_run(out_dir, "base", base_res, base_met)
+
+    add_alpha = args.factor  # default 1.4
+    add_label = f"addw_a{add_alpha}"
+    add_res, add_met = run_once(
+        gen, examples,
+        lambda a=add_alpha: _register_steering(model, args.layer, w_tensor, a),
+        add_label, args.seed,
+    )
+    save_run(out_dir, add_label, add_res, add_met, extra={
+        "arm": "additive", "hook_type": "additive",
+        "alpha": add_alpha, "factor": add_alpha,
+        "layer": args.layer, "vector_type": "probe_weights",
+        "vector_norm": w_norm,
+    })
+
+    for proj_alpha in (0.0, 2.0):
+        proj_label = f"projw_a{proj_alpha}"
+        proj_res, proj_met = run_once(
+            gen, examples,
+            lambda a=proj_alpha: _register_projection(model, args.layer, v_hat_tensor, a),
+            proj_label, args.seed,
+        )
+        save_run(out_dir, proj_label, proj_res, proj_met, extra={
+            "arm": "projection", "hook_type": "projection",
+            "alpha": proj_alpha,
+            "layer": args.layer, "vector_type": "probe_weights",
+            "vector_norm": w_norm,
+        })
+
+    # Verify state files contain hook_type and vector_type.
+    for label in ("base", add_label, "projw_a0.0", "projw_a2.0"):
+        state = json.loads((out_dir / f"{label}_state.json").read_text())
+        assert "metrics" in state, f"{label} state missing metrics"
+        if label != "base":
+            assert state.get("hook_type") in {"additive", "projection"}, label
+            assert state.get("vector_type") == "probe_weights", label
+    print(f"[smoke/probe_weights] base={base_met['accuracy']:.3f} "
+          f"{add_label}={add_met['accuracy']:.3f}")
+
+
 RUNNERS = {
     "main": run_variant_main,
     "random_control": run_variant_random_control,
@@ -402,6 +504,7 @@ RUNNERS = {
     "layer_sweep": run_variant_layer_sweep,
     "additive": run_variant_additive,
     "codelion": run_variant_codelion,
+    "probe_weights": run_variant_probe_weights,
 }
 
 
