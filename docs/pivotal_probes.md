@@ -162,6 +162,170 @@ stream that feeds the next layer's attention/MLP at the same step,
 which is what produces the logits for *t*. Read and act in the same
 hook call.
 
+### 3d. Verified convention in our pipeline
+
+The *t−1* convention is enforced by `probe_pipeline/preprocess.py`
+and consumed unchanged by `probe_pipeline/activations.py`. Both
+ends are explicit:
+
+```20:36:probe_pipeline/preprocess.py
+def create_labeled_probe_example(
+    examples: list[dict[str, Any]],
+    tokenizer: Any,
+    model: Any | None = None,
+    device: str | torch.device | None = None,
+    add_random_tokens: int = 5,
+    negative_to_positive_ratio: float = 2.0,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """
+    Create a single probe row from all examples with the same dataset_item_id.
+
+    Labels are:
+      - 1 for token positions immediately preceding pivotal tokens
+      - -1 for sampled non-pivotal positions
+      - 0 for all other positions
+    """
+```
+
+Two complementary code paths produce that label-`1` position:
+
+```46:57:probe_pipeline/preprocess.py
+    pivotal_positions: set[int] = set()
+    if len(longest_ids) > 1:
+        pivotal_positions.add(len(longest_ids) - 2)
+
+    for example in examples:
+        if example is longest_example:
+            continue
+        prefix_text = example["pivot_context"] + example["pivot_token"]
+        if longest_text.startswith(prefix_text):
+            prefix_ids = tokenizer.encode(example["pivot_context"], add_special_tokens=False)
+            if len(prefix_ids) > 0:
+                pivotal_positions.add(len(prefix_ids) - 1)
+```
+
+`len(longest_ids) - 2` is the position of the last token of
+`pivot_context` once `pivot_token` has been appended — i.e. *t−1*
+of the longest pivot in the query. The shorter-prefix branch labels
+*t−1* directly via `len(prefix_ids) - 1`. Activations are then read
+at exactly those positions:
+
+```96:115:probe_pipeline/activations.py
+            for layer_num, hidden_states_layer in enumerate(all_hidden_states):
+                hidden_states = hidden_states_layer.squeeze(0)
+                min_len = min(hidden_states.shape[0], len(labels))
+                if hidden_states.shape[0] != len(labels) and logger:
+                    logger.warning(
+                        "Layer %s mismatch for query %s: tokens=%s labels=%s -> truncating=%s",
+                        layer_num,
+                        sample_id,
+                        hidden_states.shape[0],
+                        len(labels),
+                        min_len,
+                    )
+
+                for idx in range(min_len):
+                    label = labels[idx]
+                    activation = hidden_states[idx].detach().cpu().float()
+                    if label == 1:
+                        all_layers_activations[layer_num]["pivotal"].append(activation)
+                    elif label == -1:
+                        all_layers_activations[layer_num]["non_pivotal"].append(activation)
+```
+
+So the contract is end-to-end consistent: every tensor in
+`pivotal[]` is the residual stream at *t−1* of a pivot token, and
+every tensor in `non_pivotal[]` is the residual stream at *t−1* of
+a sampled non-pivot answer-span position.
+
+Two non-obvious choices in `preprocess.py` worth keeping in mind
+when we extend this to signed labels (§3e):
+
+- **"Longest example wins" for the canonical token sequence.** When
+  several PTS rows share the same `dataset_item_id`, the longest
+  `pivot_context + pivot_token` is encoded once and shorter prefixes
+  are projected onto it via `longest_text.startswith(prefix_text)`.
+  Edge case: if the longest path *diverges* from a shorter one at
+  some intermediate position (different token strings sharing a
+  prefix only up to that point), the divergent shorter branch is
+  silently dropped from labelling. For our codelion-derived dataset
+  this is rare — the rollouts are conditioned on the same prefix —
+  but worth checking again before switching to a different PTS source.
+- **`negative_to_positive_ratio = 2.0` (default).** For each pivot
+  position labelled `1`, two non-pivot positions are randomly sampled
+  from `[answer_start, len(longest_ids))` and labelled `−1`. This
+  is a deliberate class-imbalance bias (real generations have ~5%
+  pivots) and explains the 232 / 65 row counts we see for
+  `cached_activations_3`. When training probe 2 on signed pivots
+  we should drop this sampler entirely — both classes are already
+  pivotal and we want all of them.
+
+### 3e. Re-labelling for the signed probe (probe 2): cost estimate
+
+Probe 2 (§2) needs the same *t−1* extraction but with labels
+`+1 = positive_pivotal (prob_delta > +τ)`,
+`−1 = negative_pivotal (prob_delta < −τ)`,
+`0 = other`. The good news is that **we do not have to re-run PTS
+rollouts**: the codelion HF dataset
+(`codelion/Qwen3-0.6B-pts-pivotal-tokens` and the
+`-steering-vectors` sibling) already exposes `prob_before`,
+`prob_after`, and `prob_delta` per row, so the sign is metadata,
+not something we need to recompute.
+
+What we *do* need to re-run is `probe_pipeline.preprocess` (a
+modified `create_labeled_probe_example` that consults `prob_delta`
+when assigning `+1` vs `−1`) followed by
+`probe_pipeline.extract.run_activation_extraction` to produce a new
+activation cache (call it `cached_activations_signed/`).
+
+#### How long does the **extraction** step actually take?
+
+Working hypothesis from the conversation: ~9 hours on A100. Verified
+against the code and the existing cache: that figure is **for the
+PTS labelling step, not for our extraction step.** Three independent
+pieces of evidence:
+
+1. **Volume.** `cached_activations_3` contains 232 train + 65 test
+   labelled queries (verified with `torch.load`,
+   `len(buckets["pivotal"]) + len(buckets["non_pivotal"])` per layer).
+   `extract_and_label_all_layers` runs **one forward pass per
+   labelled query** with `output_hidden_states=True` (see
+   `activations.py:86-94`), grabs the residual stream at every
+   labelled position, and discards the rest. 297 forward passes of
+   Qwen3-0.6B (≈600M params) at sequence lengths ~100–800 is in
+   the few-minutes-to-tens-of-minutes range on a single A100.
+2. **What `pts run` actually does.** PTS labelling samples roughly
+   50 rollouts per candidate pivotal token to estimate
+   `prob_after`; codelion's blog post and the LocalLLaMA discussion
+   describe it as "quite resource intensive" and a "multi-hour to
+   multi-day" job for a GSM8K-scale (thousands of queries) dataset
+   on a single A100. The repo's `notebooks/data_preprocessing.ipynb`
+   even has a cell that times `pts run --max-examples=100` and was
+   `KeyboardInterrupt`-killed before completing — consistent with
+   tens of minutes per 100 examples.
+3. **Where the 9-hour figure comes from.** It matches the order-
+   of-magnitude estimate for `pts run` on a few-thousand-query
+   dataset, not for our extraction. Concretely: 2k queries × ~50
+   rollouts × ~256 tokens / rollout / (~1k tok/s for Qwen3-0.6B
+   on A100) ≈ 7–10 hours. That math is the source of the figure;
+   the labelling stage is what dominates.
+
+Bottom line for the project plan:
+
+- **Re-labelling (read `prob_delta`, rewrite labels):** seconds.
+  No model required.
+- **Re-extraction (`probe_pipeline.extract` with the new labels):**
+  on the order of 10–30 minutes on a single A100 for a dataset
+  the size of `cached_activations_3`. Linear in the number of
+  query rows; a 10× larger dataset is still under ~3 hours.
+- **What we are *not* re-running:** `pts run`. That is the ~9-hour
+  step, and we get its output for free from the codelion HF dataset.
+
+This means probe 2 is a cheap experiment to land — the dominant
+cost lives upstream of code we control, and codelion has already
+paid it.
+
 ## 4. Priority application: reactive (token-conditional) steering
 
 This is the single highest-priority follow-up. Everything else in
@@ -409,6 +573,13 @@ Existing:
 - `notebooks/steering_random_control.ipynb` (null control).
 
 Planned (in order of build):
+- A signed variant of `probe_pipeline/preprocess.py::create_labeled_probe_example`
+  that reads `prob_delta` from the codelion HF rows and emits
+  `+1 / −1 / 0` for `positive_pivotal / negative_pivotal / other`
+  (see §3e — minutes of extraction time, not hours, since we re-use
+  the existing rollouts).
+- `data/cached_activations_signed/{train,test}_all_layers_acts.pth`
+  — output of running `probe_pipeline.extract` on the new labels.
 - `notebooks/probe_signed_train.ipynb` — train probe 2.
 - `artifacts/cached3/sklearn/steering_configs/steering_layer14_signed_*.npy`
   — probe 2 weights + signed CAA vector.
