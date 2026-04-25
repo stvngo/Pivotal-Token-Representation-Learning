@@ -1,0 +1,58 @@
+{
+  "base": {
+    "accuracy": 0.2,
+    "f1": 0.20000000000000004,
+    "parse_rate": 1.0,
+    "correct": 20,
+    "n": 100
+  },
+  "steered_1.2": {
+    "accuracy": 0.27,
+    "f1": 0.27,
+    "parse_rate": 1.0,
+    "correct": 27,
+    "n": 100
+  },
+  "steered_1.4": {
+    "accuracy": 0.25,
+    "f1": 0.25,
+    "parse_rate": 1.0,
+    "correct": 25,
+    "n": 100
+  },
+  "steered_1.6": {
+    "accuracy": 0.2,
+    "f1": 0.20000000000000004,
+    "parse_rate": 1.0,
+    "correct": 20,
+    "n": 100
+  },
+  "steered_1.8": {
+    "accuracy": 0.18,
+    "f1": 0.18,
+    "parse_rate": 1.0,
+    "correct": 18,
+    "n": 100
+  },
+  "steered_2.0": {
+    "accuracy": 0.23,
+    "f1": 0.23,
+    "parse_rate": 1.0,
+    "correct": 23,
+    "n": 100
+  },
+  "steered_0.0": {
+    "accuracy": 0.25,
+    "f1": 0.25,
+    "parse_rate": 1.0,
+    "correct": 25,
+    "n": 100
+  },
+  "steered_-1.0": {
+    "accuracy": 0.18,
+    "f1": 0.18,
+    "parse_rate": 1.0,
+    "correct": 18,
+    "n": 100
+  }
+}

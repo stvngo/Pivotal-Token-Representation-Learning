@@ -1,0 +1,38 @@
+{
+  "1.2": {
+    "base_acc": 0.2,
+    "pivotal_acc": 0.27,
+    "random_accs": [
+      0.21,
+      0.19,
+      0.23
+    ],
+    "random_mean": 0.21,
+    "random_std": 0.016329931618554526,
+    "pivotal_vs_random_mean_pp": 6.000000000000003
+  },
+  "0.0": {
+    "base_acc": 0.2,
+    "pivotal_acc": 0.25,
+    "random_accs": [
+      0.16,
+      0.26,
+      0.13
+    ],
+    "random_mean": 0.18333333333333335,
+    "random_std": 0.05557777333511022,
+    "pivotal_vs_random_mean_pp": 6.666666666666665
+  },
+  "-1.0": {
+    "base_acc": 0.2,
+    "pivotal_acc": 0.18,
+    "random_accs": [
+      0.02,
+      0.09,
+      0.02
+    ],
+    "random_mean": 0.043333333333333335,
+    "random_std": 0.03299831645537222,
+    "pivotal_vs_random_mean_pp": 13.666666666666666
+  }
+}
