@@ -1,0 +1,23 @@
+{
+  "C": 1.0,
+  "solver": "saga",
+  "standardize": true,
+  "n_train": 464,
+  "n_val": 130,
+  "val_accuracy_pct": 71.53846153846153,
+  "f1_score": 0.6890756302521008,
+  "auroc_score": 0.7794082840236687,
+  "confusion_matrix": [
+    [
+      52,
+      13
+    ],
+    [
+      24,
+      41
+    ]
+  ],
+  "cosine_to_caa_train": 0.3011784851551056,
+  "weight_norm": 4.777472496032715,
+  "sha256_16": "cc697ff1abd64c27"
+}

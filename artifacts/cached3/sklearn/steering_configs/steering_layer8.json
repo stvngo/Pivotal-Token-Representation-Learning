@@ -1,0 +1,13 @@
+{
+  "backend": "sklearn",
+  "layer": 8,
+  "vector_type": "centroid_diff",
+  "factors": [
+    1.2,
+    1.4,
+    2.0
+  ],
+  "hidden_dim": 1024,
+  "vector_norm": 4.418452262878418,
+  "vector_path": "steering_layer8_vector.npy"
+}

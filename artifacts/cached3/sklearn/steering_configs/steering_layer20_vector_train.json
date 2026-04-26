@@ -1,0 +1,12 @@
+{
+  "layer": 20,
+  "source_cache": "data/cached_activations_3 (without query positions)/train_all_layers_acts.pth",
+  "split": "train",
+  "n_pos": 232,
+  "n_neg": 232,
+  "hidden_dim": 1024,
+  "vector_norm": 29.3457088470459,
+  "sha256_16": "f145fe5753741cc3",
+  "cosine_to_val_vector": 0.8228856921195984,
+  "issue_ref": "docs/issues.md#5-centroid_diff-is-computed-on-validation-activations"
+}
