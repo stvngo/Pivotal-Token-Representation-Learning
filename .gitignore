@@ -66,3 +66,6 @@ artifacts/
 data/probe_dataset/
 configs/pipeline.cached*.yaml
 
+/nb_results
+nb_results_nie_20260425_232740.zip
+notebooks/.executed/nie_eval.ipynb
