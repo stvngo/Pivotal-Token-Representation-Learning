@@ -249,13 +249,36 @@ def pick_device():
     return "cpu", torch.float32
 
 
-def load_probe(probe_dir: Path, layer: int):
+def load_probe(probe_dir: Path, layer: int, *, prefer_train_caa: bool = True):
+    """Load steering bundle from ``probe_dir``.
+
+    Closes Issue #5: when a TRAIN-derived CAA is available
+    (``steering_layer{L}_vector_train.npy``) it is preferred over the legacy
+    val-derived ``_vector.npy``. The corresponding ``_train.json`` (if
+    present) is used to refresh ``vector_norm`` so downstream consumers see
+    the actual norm of the returned tensor.
+    """
     cfg_path = probe_dir / f"steering_layer{layer}.json"
-    vec_path = probe_dir / f"steering_layer{layer}_vector.npy"
-    if not (cfg_path.exists() and vec_path.exists()):
-        raise FileNotFoundError(f"probe files missing at {cfg_path}, {vec_path}")
+    train_vec_path = probe_dir / f"steering_layer{layer}_vector_train.npy"
+    val_vec_path = probe_dir / f"steering_layer{layer}_vector.npy"
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"probe config missing at {cfg_path}")
+    if prefer_train_caa and train_vec_path.exists():
+        vec_path = train_vec_path
+        vec_source = "centroid_diff_train"
+    elif val_vec_path.exists():
+        vec_path = val_vec_path
+        vec_source = "centroid_diff_val"
+    else:
+        raise FileNotFoundError(
+            f"no steering vector found for layer {layer}: tried "
+            f"{train_vec_path}, {val_vec_path}"
+        )
     cfg = json.loads(cfg_path.read_text())
-    vec = np.load(vec_path).astype(np.float32)
+    vec = np.load(vec_path).astype(np.float32).reshape(-1)
+    cfg["vector_path_resolved"] = str(vec_path)
+    cfg["vector_source"] = vec_source
+    cfg["vector_norm"] = float(np.linalg.norm(vec))
     return cfg, vec, cfg_path, vec_path
 
 
@@ -361,7 +384,7 @@ def run_variant_main(args, out_dir, device, dtype, probe_dir):
         label, args.seed,
     )
     save_run(out_dir, label, res, met,
-             extra={**prov(args.layer, mode, "caa_val", conv_ok),
+             extra={**prov(args.layer, mode, cfg.get("vector_source", "caa_val"), conv_ok),
                     "factor": args.factor, "strength": coef})
     print(f"[smoke/main] base={base_met['accuracy']:.3f} {label}={met['accuracy']:.3f} "
           f"(conv_check={conv_ok})")
@@ -393,7 +416,7 @@ def run_variant_random_control(args, out_dir, device, dtype, probe_dir):
         "pivotal", args.seed,
     )
     save_run(out_dir, "pivotal", piv_res, piv_met,
-             extra=prov(args.layer, mode, "caa_val", conv_ok))
+             extra=prov(args.layer, mode, cfg.get("vector_source", "caa_val"), conv_ok))
     rand_res, rand_met = run_once(
         gen, examples,
         lambda: _register_steering(model, args.layer, r, coef, mode=mode),
@@ -425,7 +448,7 @@ def run_variant_greedy(args, out_dir, device, dtype, probe_dir):
         f"steered_{args.factor}", args.seed,
     )
     save_run(out_dir, f"steered_{args.factor}", res, met,
-             extra={**prov(args.layer, mode, "caa_val", conv_ok), "decoding": "greedy"})
+             extra={**prov(args.layer, mode, cfg.get("vector_source", "caa_val"), conv_ok), "decoding": "greedy"})
     print(f"[smoke/greedy] base={base_met['accuracy']:.3f} steered={met['accuracy']:.3f}")
 
 
@@ -460,7 +483,7 @@ def run_variant_layer_sweep(args, out_dir, device, dtype, probe_dir):
             label, args.seed,
         )
         save_run(out_dir, label, res, met,
-                 extra={**prov(L, mode, "caa_val", conv_oks[L]),
+                 extra={**prov(L, mode, cfg.get("vector_source", "caa_val"), conv_oks[L]),
                         "factor": args.factor})
         print(f"[smoke/layer_sweep] L{L}: {met['accuracy']:.3f}")
 
@@ -490,7 +513,8 @@ def run_variant_additive(args, out_dir, device, dtype, probe_dir):
         "multi_layer_additive", args.seed,
     )
     save_run(out_dir, "multi_layer_additive", res, met,
-             extra={**prov(present[0], mode, "caa_val_multilayer",
+             extra={**prov(present[0], mode,
+                           cfg.get("vector_source", "caa_val") + "_multilayer",
                            all(conv_oks.values())),
                     "injections": [(L, float(s)) for L, _, s in spec]})
     print(f"[smoke/additive] base={base_met['accuracy']:.3f} additive={met['accuracy']:.3f}")
@@ -692,7 +716,8 @@ def run_variant_reactive(args, out_dir, device, dtype, probe_dir):
         always_res, always_met = run_once(gen, examples, None, "always_on", args.seed)
     arms["always_on"] = always_hook.stats.to_dict()
     save_run(out_dir, "always_on", always_res, always_met, extra={
-        **prov(args.layer, "additive_normalized", "caa_val", conv_ok),
+        **prov(args.layer, "additive_normalized",
+               cfg.get("vector_source", "caa_val"), conv_ok),
         "arm": "always_on", "factor": args.factor,
         "fire_rate": arms["always_on"]["fire_rate"],
         "energy": arms["always_on"]["energy"],
@@ -796,7 +821,8 @@ def run_variant_nie(args, out_dir, device, dtype, probe_dir):
                   "nie_mean": result["nie_mean"],
                   "nie_median": result["nie_median"],
                   "n_positions": result["n_positions"]},
-                 extra={**prov(args.layer, mode, "caa_val", conv_ok),
+                 extra={**prov(args.layer, mode,
+                               cfg.get("vector_source", "caa_val"), conv_ok),
                         "coef": coef,
                         "bootstrap_ci": result["bootstrap_ci"],
                         "log_p_base_mean": result["log_p_base_mean"],
