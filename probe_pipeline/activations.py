@@ -47,6 +47,39 @@ def list_available_layers(train_acts: ActivationStore, test_acts: ActivationStor
     return sorted(set(train_acts.keys()).intersection(set(test_acts.keys())))
 
 
+def centroid_diff_from_cache(
+    cache_path: str | Path,
+    layer: int,
+) -> np.ndarray:
+    """Compute mu_pos - mu_neg for ``layer`` from a cached activation store.
+
+    Closes Issue #5 from docs/issues.md: the on-disk steering vectors at
+    ``analysis_data/layer_{L}/activations_layer_{L}.npy`` were derived from the
+    20% **validation** slice. The training cache (``train_all_layers_acts.pth``)
+    contains the full ~80% the LR probe was actually fit on; this helper builds
+    the centroid-difference direction from that slice instead.
+
+    Returns a ``float32`` ``(hidden_dim,)`` array suitable for direct use as a
+    steering vector.
+    """
+    store = load_activation_store(cache_path)
+    if layer not in store:
+        raise KeyError(
+            f"layer {layer} not found in cache {cache_path!r}; "
+            f"available={sorted(store.keys())}"
+        )
+    pos = store[layer]["pivotal"]
+    neg = store[layer]["non_pivotal"]
+    if not pos or not neg:
+        raise ValueError(
+            f"layer {layer} has empty bucket(s): pos={len(pos)} neg={len(neg)}"
+        )
+    x_pos = torch.stack([t.detach().cpu().float() for t in pos], dim=0).numpy()
+    x_neg = torch.stack([t.detach().cpu().float() for t in neg], dim=0).numpy()
+    diff = x_pos.mean(axis=0) - x_neg.mean(axis=0)
+    return diff.astype(np.float32)
+
+
 def layer_arrays(
     activations: ActivationStore,
     layer_num: int,
