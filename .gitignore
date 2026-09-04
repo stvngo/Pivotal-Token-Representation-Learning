@@ -64,8 +64,26 @@ torch_compile_cache/
 ### Local pipeline runs
 artifacts/
 data/probe_dataset/
-configs/pipeline.cached*.yaml
 
 /nb_results
-nb_results_nie_20260425_232740.zip
-notebooks/.executed/nie_eval.ipynb
+nb_results*.zip
+notebook_runs/
+notebooks/.executed/
+
+### Upstream PTS, cloned not vendored (see configs/ for the pinned commit)
+/pts/
+
+### Paper: track the LaTeX source, not the vendor zips or build output
+paper/*.zip
+paper/**/*.aux
+paper/**/*.bbl
+paper/**/*.blg
+paper/**/*.fdb_latexmk
+paper/**/*.fls
+paper/**/*.out
+paper/**/*.synctex.gz
+paper/**/*.toc
+
+### Secrets — never commit HF tokens
+.env
+*.token

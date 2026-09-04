@@ -1,0 +1,56 @@
+seed: 42
+device: auto
+
+model:
+  name: Qwen/Qwen3-0.6B
+  trust_remote_code: true
+
+paths:
+  activations:
+    train: "data/cached_activations_3 (without query positions)/train_all_layers_acts.pth"
+    test: "data/cached_activations_3 (without query positions)/test_all_layers_acts.pth"
+  datasets:
+    train_probe: data/probe_dataset/train
+    test_probe: data/probe_dataset/test
+  outputs:
+    pytorch_dir: artifacts/cached3/pytorch
+    sklearn_dir: artifacts/cached3/sklearn
+    plots_dir: artifacts/cached3/plots
+    logs_dir: artifacts/cached3/logs
+    gsm8k_eval_dir: artifacts/cached3/gsm8k_eval
+
+steering:
+  layers: [14, 16, 20]
+  factors: [1.2, 1.4, 2.0]
+  vector_type: centroid_diff
+
+evaluation:
+  gsm8k_max_examples: 200
+  gsm8k_split: test
+  max_new_tokens: 256
+  temperature: 0.6
+
+training:
+  layers: []
+  num_layers: null
+  epochs: 10
+  batch_size: 32
+  learning_rate: 0.001
+  threshold: 0.5
+  shuffle: true
+  max_train_samples_per_class: null
+  max_val_samples_per_class: null
+
+sklearn:
+  solver: saga
+  max_iter: 3000
+  C: 1.0
+  class_weight: null
+  standardize: true
+  random_state: 42
+
+visualization:
+  layers: []
+  num_layers: 2
+  tsne_perplexity: 30
+

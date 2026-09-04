@@ -1,0 +1,172 @@
+% Pivotal Token Representation Learning
+%
+% Track option: use `dblblindworkshop` (or `sglblindworkshop`) for the
+% workshop submission, together with \workshoptitle{...}. While drafting,
+% `preprint` is convenient because it shows author names.
+%
+% Build:  make        (latexmk -pdf main.tex)
+%         make clean
+%
+% STATUS: scaffold. Every results number is a \TODO until it has been
+% produced by the rebuilt pipeline. Nothing from the pre-2026-09 runs is
+% carried in -- see the audit in the project plan (Parts 3 and 4).
+
+\documentclass{article}
+\usepackage[preprint]{neurips_2026}
+% \usepackage[dblblindworkshop]{neurips_2026}
+% \workshoptitle{TODO: Workshop Name}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+\newcommand{\TODO}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\pdelta}{\Delta p}
+
+\title{Predicting Pivotal Tokens Before They Are Generated}
+
+\author{%
+  Steven Ngo \\
+  \texttt{svinhngo@gmail.com} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\TODO{Write last.} Skeleton of the argument: Pivotal Token Search
+\citep{abdin2024phi4technicalreport,pts} identifies the individual tokens
+at which a language model's probability of reaching a correct answer
+shifts sharply, but it does so \emph{offline} and at a cost of tens of
+sampled rollouts per candidate position. We ask whether pivotality is
+recoverable from the model's own residual stream \emph{one step before}
+the token is emitted, which would convert an expensive analysis procedure
+into a single dot product usable during decoding. We further ask whether
+the \emph{sign} of the impending shift---whether the next token will help
+or hurt---is separately decodable, a distinction the original pivotality
+criterion discards by construction.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+\TODO{Write after Phase 2 results land.} Claim ladder to defend, in
+dependency order (see also Section~\ref{sec:results}):
+
+\begin{enumerate}
+  \item \textbf{Decodability.} Pivotality at step $t$ is linearly
+    decodable from the residual stream at $t-1$, above chance and above a
+    token-identity control.
+  \item \textbf{Sign.} The \emph{direction} of the impending probability
+    shift is separately decodable at $t-1$.
+  \item \textbf{Beyond uncertainty.} Both probes exceed next-token
+    entropy, top-2 margin, and Jensen--Shannon baselines.
+  \item \textbf{Amortization.} The probe approximates the PTS oracle at a
+    measured compute ratio.
+  \item \textbf{Selective causality.} Probe-gated intervention along the
+    signed direction, evaluated at matched intervention budget.
+\end{enumerate}
+
+\section{Background and Related Work}
+\label{sec:related}
+
+\paragraph{Pivotal tokens.} \citet{abdin2024phi4technicalreport} introduce
+Pivotal Token Search to build preference pairs for Phi-4;
+\citet{pts} released an open implementation and datasets.
+\TODO{state the $|\pdelta| > \tau$ criterion formally here.}
+
+\paragraph{Sentence-scale reasoning importance.} Thought Anchors
+\citep{bogdan2025thoughtanchors} identifies high-influence \emph{sentences}
+by counterfactual resampling. We work at token scale, which is where the
+$t-1$ prediction problem is well posed.
+
+\paragraph{Uncertainty as the incumbent notion of criticality.}
+\citet{wang2025beyond8020} show that high-entropy ``forking'' tokens carry
+most of the learning signal in RLVR. This makes next-token uncertainty the
+baseline any claim about token criticality must beat, and we treat it as
+such rather than as a footnote. Note that entropy is sign-blind by
+construction, so it cannot in principle explain a working signed probe.
+
+\paragraph{Probing and steering.} Linear probes on intermediate
+representations \citep{alain2018understandingintermediatelayersusing,
+marks2024geometryoftruth}; contrastive activation addition
+\citep{rimsky2024caa,huang2024steering}; conditional/gated steering
+\citep{lee2024conditionalactivationsteering}. Our gate differs in
+\emph{what it conditions on}: not a semantic category of input, but a
+prospective, outcome-grounded property of the very next token.
+
+\paragraph{Value versus leverage.} Process reward models and value probes
+\citep{li2024qprobe} estimate $P(\text{success} \mid \text{prefix})$---a
+level. Pivotality is $|\pdelta|$ at the next token---a sensitivity. We
+include a value-probe-derived baseline to make the distinction empirical
+rather than rhetorical.
+
+\section{Method}
+\label{sec:method}
+
+\subsection{Labels}
+\TODO{Formal statement.} Group PTS events by source question; the
+canonical token sequence is the full rollout. Position $t-1$ immediately
+preceding a pivotal token is labelled positive; sampled non-pivotal
+answer-span positions are labelled negative; all other positions are
+excluded. Extraction at $t-1$ rather than $t$ is what makes the probe
+usable during decoding.
+
+\subsection{Label noise in the PTS oracle}
+\label{sec:labelnoise}
+$\widehat{\pdelta}$ is a difference of two binomial estimates from $S$
+rollouts each, accepted when $|\widehat{\pdelta}| \ge \tau$. Under the
+null, $\mathrm{Var}(\widehat{\pdelta}) = 2p(1-p)/S$, so at the reference
+setting $S{=}50$, $\tau{=}0.2$ the threshold sits at only $2\sigma$.
+\TODO{report measured false-positive rate and the accuracy gap between
+all-labels and the high-confidence subset.}
+
+\subsection{Probes}
+\TODO{Probe 1 (unsigned) and Probe 2 (signed) definitions, regularization,
+nested layer selection, cluster-bootstrap CIs over questions.}
+
+\subsection{Intervention}
+\TODO{Signed direction $\mu_{+} - \mu_{-}$; cascade gate
+$p_{\text{steer}} = P_1 \cdot (1 - P_2)$; matched fire rate and matched
+injected energy against always-on and random-direction controls.}
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+\TODO{Fill in once Phase 4 lands.} Models: Qwen3-0.6B/1.7B/4B
+\citep{qwen3technicalreport} and DeepSeek-R1-Distill-Qwen-1.5B
+\citep{deepseekr1}. Task: GSM8K \citep{cobbe2021gsm8k}. PTS generation
+uses a vLLM \citep{kwon2023vllm} rollout backend.
+
+\section{Results}
+\label{sec:results}
+
+\TODO{Nothing here yet. No number enters this section until it has been
+produced by the rebuilt pipeline and passed its phase gate.}
+
+\section{Limitations}
+\label{sec:limitations}
+
+\TODO{Carry these honestly.} Anticipated: PTS labels are themselves noisy
+(Section~\ref{sec:labelnoise}); the pivotality criterion selects for
+questions in a mid-difficulty band, so pivot density is confounded with
+task difficulty relative to model capability; results are on a single
+task family; linear probes test linear decodability only.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\section{Appendix}
+\TODO{Layer sweeps, baseline battery detail, hyperparameters.}
+
+\end{document}

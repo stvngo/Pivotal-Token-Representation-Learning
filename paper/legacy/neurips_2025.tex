@@ -1,0 +1,457 @@
+\documentclass{article}
+
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2025
+
+
+% ready for submission
+\usepackage{neurips_2025}
+\usepackage[font=normalsize,labelfont=bf]{caption}
+
+
+% FOR REFERENCES
+\PassOptionsToPackage{numbers,square,sort&compress}{natbib}
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+ % \usepackage[preprint]{neurips_2025}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+%\usepackage[final]{neurips_2025}
+
+
+% to avoid loading the natbib package, add option nonatbib:
+%    \usepackage[nonatbib]{neurips_2025}
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{siunitx}        % for 'S' column type in tables
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+
+
+
+\title{Pivotal Token Representations Encode Reasoning Shifts in Large Language Models}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+\author{%
+Steven Ngo\thanks{First Author} \quad Taiwo Omoya \quad Zurabi
+Kochiashvili \quad Dylan T. Tran \quad \\
+\textbf{Cole Blondin}\thanks{Senior Author} \quad \textbf{Sean
+O'Brien}\footnotemark[2] \quad \textbf{Kevin
+Zhu} \footnotemark[2] \\
+Algoverse AI Research \\
+\texttt{svngo@ucsd.edu},  
+\texttt{kevin@algoverse.us}
+% examples of more authors
+% \And
+% Taiwo Omoya \\
+% Hudson Valley Community College \\
+% % Address \\
+% \texttt{email} \\
+% \AND
+% Zurabi Kochiashvili \\
+% Department of Computer Science \\
+% Stony Brook University \\
+% \texttt{email} \\
+% \And
+% Dylan T. Tran \\
+% Henry Sameuli School of Engineering \\ 
+% University of California, Irvine \\ 
+% \texttt{email} \\
+% \And
+% Cole Blondin\thanks{Senior Author} \\
+% Algoverse \\
+% Address \\
+% \texttt{email} \\
+% \And
+% Sean O'Brien\footnotemark[2] \\
+% Algoverse \\
+% Address \\
+% texttt{email} \\
+}
+
+
+% TikZ and diagram packages
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric,calc}
+
+
+\begin{document}
+
+
+\maketitle
+
+
+\begin{abstract}
+As large language models (LLMs) continue to scale in reasoning capability, the mechanisms by which their internal representations encode intermediate decision-making steps remain poorly understood. Prior work has utilized Pivotal Token Search (PTS) to identify pivotal tokens—tokens within a reasoning trace that substantially influence the probability of a correct final answer—but none have formulated methods for interpreting them. In this work, we present a probing method to predict and classify pivotal features underlying Qwen3-0.6B activations. We find that these features correspond to consistent, weighted directions in the latent space across multiple layers, such that attending to these directions may elicit different behaviors in the LLM's reasoning path. We suspect that probing may have implications for computationally cheaper approaches to PTS. We will publicly release code, data, and other artifacts upon acceptance.
+\end{abstract}
+
+
+\section{Introduction}
+
+
+Large language models (LLMs) have demonstrated strong reasoning abilities when prompted with step-by-step examples, most prominently through Chain-of-Thought (CoT) prompting \citep{wei2023chainofthoughtpromptingelicitsreasoning}. While this capability has been extensively studied at the behavioral level, the internal mechanisms by which LLMs represent and execute multi-step reasoning behavior remain poorly understood. 
+
+\citet{abdin2024phi4technicalreport} introduced \textit{Pivotal Token Search} (PTS), a technique that leverages a binary search algorithm and an oracle to identify \textit{pivotal tokens}—intermediate tokens in the reasoning path that strongly influence a model’s likelihood of reaching the correct answer. These tokens have been shown to steer models toward better reasoning success when incorporated into Direct Preference Optimization (DPO) fine-tuning \citep{lin2025criticaltokensmattertokenlevel,abdin2024phi4technicalreport}. However, PTS is computationally expensive and requires repeated forward passes per token position, which scales poorly with longer contexts and larger datasets. Moreover, while pivotal tokens are known to exist, there is no systematic method to interpret the features they encode. 
+
+In this work, we investigate whether \textit{pivotalness} can be identified more efficiently through linear probes trained on hidden activations. If pivotal tokens are encoded in linearly separable directions in the model's representation space, then lightweight probes could approximate PTS at a fraction of the cost, while also offering a new window into the internal structure of their reasoning trajectories.
+
+
+\textbf{Our contributions are as follows:}
+\begin{itemize}
+    \item We refine and preprocess an open-source dataset of pivotal tokens and their surrounding contexts \citep{codelionQwen3}.
+    \item We propose a probing framework for classifying pivotal vs.\ non-pivotal activations in Qwen3-0.6B.
+    \item We provide preliminary evidence that pivotalness corresponds to weighted directions in the latent space across multiple layers.
+    \item We discuss hypotheses for steering pivotal directions during generation (e.g., inducing ``skepticism'' toward flawed reasoning) \citep{huang2024steering, subramani2022extractinglatentsteeringvectors} and for aggregating probes across layers to improve performance \citep{zhu2025project_probe_aggregate, beaglehole2025universalsteeringmonitoringai}.
+\end{itemize}
+
+By reframing PTS through probing, we aim to lay the groundwork for mechanistic interventions into model reasoning.
+
+
+\section{Background and Related Works}
+
+\textbf{Large language models (LLMs)} exhibit strong reasoning performance when guided by Chain-of-Thought (CoT) prompting \citep{wei2023chainofthoughtpromptingelicitsreasoning}, yet the internal mechanisms supporting this behavior remain poorly understood. Mechanistic interpretability has provided tools to study hidden states, including linear probes for feature localization \citep{alain2018understandingintermediatelayersusing}, activation patching, and sparse autoencoders for disentangling polysemantic neurons \citep{bricken2023monosemanticity}. These methods suggest that meaningful directions can exist in the representation space, though reasoning-specific phenomena are less explored.
+
+
+\textbf{Pivotal Token Search (PTS)}\citep{abdin2024phi4technicalreport, pts} introduced a principled way to identify \textit{pivotal tokens}— tokens within a reasoning trace that dramatically shifts the probability of producing a successful generation. For a given prompt and completion, PTS estimates $P(\text{success} \mid \text{prefix})$ at different points in the generation, utilizing a binary search procedure to recursively partition and locate these sharp probability shifts. These discovered tokens are used to construct preference pairs for fine-tuning, but the method is computationally expensive by design and does not explain how \textit{pivotalness} is encoded in the hidden states.
+
+
+\textbf{Mechanistic Interpretability} Our work investigates whether pivotalness corresponds to an interpretable direction in representation space, detectable with linear probes trained on PTS labels. If such directions exist, they could not only serve as a lightweight alternative to PTS classification at runtime, but also enable new forms of representation steering—interventions that amplify, suppress, or reweight reasoning-critical activations. This connects pivotal tokens to broader interpretability work on feature editing, causal tracing, and activation-level interventions \citep{elhage2022toymodelsofsuperposition, subramani2022extractinglatentsteeringvectors, huang2024steering}, extending these ideas from semantic features to reasoning dynamics.
+
+
+
+
+
+\section{Methodology}
+\label{headings}
+
+\subsection{Dataset}
+We build on the open-source Pivotal Token Search (PTS) dataset from \citet{codelionQwen3}, which contains Qwen3-0.6B generations on GSM8K annotated with pivotal tokens. Each row provides a query, a reasoning trace, and one or more tokens identified as \textit{pivotal} via PTS.
+
+To adapt this dataset for probing, we convert each example into token-level labels using the following scheme:
+\begin{itemize}
+    \item \textbf{Pivotal tokens (1):} Any token directly preceding a pivot (when its context matches a shorter prefix of the same query) is labeled as pivotal.
+    \item \textbf{Non-pivotal tokens (-1):} For each pivotal token, we randomly sample one token from the model’s \textit{answer portion} that was not already labeled. This ensures a balanced 1:1 ratio of pivotal and non-pivotal examples.
+    \item \textbf{Neutral tokens (0):} All remaining tokens in the context are labeled neutral. To reduce end-of-sequence bias, we append $k=5$ additional random tokens at the end of each sequence.
+\end{itemize}
+
+After preprocessing and an 80/20 split, this yields 83 training and 21 validation examples, balanced across 232 pivotal and 232 non-pivotal train activations, along with 70 pivotal and 70 non-pivotal validation activations distributed over 29 transformer layers.
+
+
+
+\subsection{Probe Architecture}
+To test whether pivotalness is encoded in model activations, we use a standard \textit{linear probe} \citep{alain2018understandingintermediatelayersusing}. Each probe is trained independently on hidden states $h_{\ell,i}$ from a specific transformer layer $\ell$ at a token position $i$. The probe projects the hidden state into a scalar score:
+\[
+z_{\ell,i} = w_\ell^\top h_{\ell,i} + b_\ell ,
+\]
+which is passed through a sigmoid to yield the probability that the token $i$ is pivotal:
+\[
+p_{\ell,i} = \sigma(z_{\ell,i}).
+\]
+
+We treat $p_{\ell,i}$ as the predicted pivotalness of the token $i$. A threshold $0.5$ is used for the classification. Each probe is trained independently per layer, allowing us to study whether pivotal features are consistently represented across different depths of the network.
+
+This simple design was chosen deliberately: by restricting probes to a linear classifier, we test for \textit{linearly separable directions} corresponding to pivotal tokens, rather than fitting more expressive but less interpretable models.
+
+
+\subsection{Layer-wise Probe Training and Evaluation}
+For each of the 29 transformer layers in Qwen3-0.6B, we train an independent linear probe to predict whether a token is pivotal. Each probe is trained on activation–label pairs $(h_{\ell,i}, y_i)$, where $h_{\ell,i}$ is the hidden state at layer $\ell$ and token $i$, and $y_i \in \{-1,1\}$ indicates pivotal ($+1$) or non-pivotal ($-1$). Neutral tokens are excluded, making the task a strictly binary classification.
+
+The objective is Binary Cross-Entropy loss:
+\[
+\mathcal{L} = -\frac{1}{N} \sum_{i=1}^{N} \Big( y_i \log \hat{p}_i + (1 - y_i) \log (1 - \hat{p}_i) \Big).
+\]
+
+Evaluation is performed on a held-out validation set. We report accuracy as a baseline sanity check, and precision, recall, F1 score, and ROC AUC as our primary metrics, along with confusion matrices for qualitative inspection. This comprehensive set of metrics allows us to understand both class balance behavior and probe discriminative power across layers.
+
+By training probes independently at each depth, we assess how pivotal features are represented throughout the network and whether they are concentrated in specific layers or distributed more broadly.
+
+
+\subsection{Class Rebalancing}
+In addition to training probes on a balanced dataset (1:1 positives to negatives), we also experimented with oversampling negative examples to create a 1:2 ratio. This was motivated by observations of false positives in the baseline setup. The rebalanced dataset consisted of 227 positives and 449 negatives in the training set, and 70 positives and 140 negatives in the validation set.
+
+
+\subsection{Limitations of Methods}
+While our probing approach provides an interpretable test for pivotal feature encoding, several limitations must be acknowledged. First, the dataset size is relatively small (83 training and 21 validation examples), which restricts statistical power and may lead to overfitting despite the simplicity of linear probes. Second, our probes are trained independently per layer, without cross-layer aggregation; this may overlook distributed representations of pivotalness that only emerge across multiple layers. Third, we restrict ourselves to a binary classification task, excluding neutral tokens. While this simplifies training, it may miss subtler gradations in how tokens contribute to reasoning. Finally, linear probes, by design, only test for linearly separable features. Nonlinear or interaction effects may exist but remain outside the scope of this study. 
+
+These limitations suggest that our results should be interpreted as \textit{preliminary} evidence of linearly separable pivotal directions, rather than a comprehensive characterization of how models encode reasoning steps.
+
+
+\section{Results}
+
+\subsection{Layer-wise Probe Performance}
+
+Overall, the linear probes demonstrated moderate ability to separate pivotal from non-pivotal activations across layers of Qwen3-0.6B. Performance varied by layer, with several mid-to-late layers exhibiting stronger discriminative signals.
+
+\begin{table}[h]
+\centering
+\setlength{\tabcolsep}{6pt} % spacing between columns
+\renewcommand{\arraystretch}{1.2} % row spacing
+\begin{tabular}{c c c c c c c c}
+\toprule
+\textbf{Layer} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{ROC AUC} & \textbf{FPR} & \textbf{FNR} \\
+\midrule
+14 & \textbf{0.746} & \textbf{0.776} & 0.692 & \textbf{0.732} & \textbf{0.802} & \textbf{0.200} & 0.308 \\
+16 & 0.708 & 0.702 & \textbf{0.723} & 0.712 & 0.791 & 0.308 & \textbf{0.277} \\
+17 & 0.723 & 0.723 & \textbf{0.723} & 0.723 & 0.793 & 0.277 & \textbf{0.277} \\
+27 & 0.708 & 0.702 & \textbf{0.723} & 0.712 & 0.715 & 0.308 & \textbf{0.277} \\
+\midrule
+\textbf{Avg} & 0.686 & 0.692 & 0.672 & 0.676 & 0.747 & 0.316 & 0.328 \\
+\bottomrule
+\end{tabular}
+\vspace{1em}
+\caption{Performance metrics for the top 4 layers and average scores across all layers on the 1:1 dataset. The best value in each metric column is bolded.}
+\label{tab:layer-performance-1to1}
+\end{table}
+Layer 14 achieved the best overall balance across metrics, with an F1 of 0.732 and ROC AUC of 0.802. Later layers, such as 16, 17, and 27, showed stronger recall and reduced false negative rates, suggesting that pivotal token representations become more linearly separable in the mid-to-late transformer blocks. Across all layers, ROC AUC values (average 0.747) consistently exceeded raw accuracy, indicating that although the probes capture useful directions, threshold-dependent metrics are less stable on this dataset. See Appendix~\ref{app:visuals} for visualizations of pivotal and non-pivotal activations.
+
+
+\subsection{Effect of Class Rebalancing}
+
+We also examined the effect of class rebalancing, where negative examples were oversampled at a 1:2 ratio relative to positives. This adjustment to the training data modestly improved average accuracies (0.800) and AUROC (0.757), but substantially increased the false negative rate, confirming that class imbalance remains a limiting factor in probe performance. Full results for the top-performing layers are reported in Appendix~\ref{app:layer-performance-1to2}.
+
+
+\section{Discussion}
+
+Our results show that linear probes trained on Qwen3-0.6B activations are capable of distinguishing partially consistent directions across multiple intermediate layers, with the strongest performance concentrated in the middle of the network (e.g., Layers 14–16). These findings provide evidence that the property of \textit{pivotalness} is encoded in linearly separable directions within the model’s representation space. Notably, probes trained on skewed datasets achieved modest but consistent improvements in validation accuracy, suggesting that data curation plays a meaningful role in reducing Type I errors.
+
+While the probes themselves are diagnostic tools, they also open up hypotheses for future work. First, the directions identified by the probes could potentially be used for \textit{steering}: intervening on hidden activations to amplify or suppress pivotal features. Such interventions may alter reasoning trajectories, for example by introducing “skepticism” about low-confidence reasoning paths or reinforcing high-confidence steps. Second, because PTS requires multiple forward passes and oracle queries, probe-based classification represents a lightweight alternative for identifying pivotal tokens at runtime. This could enable applications where efficiency is critical, such as real-time reasoning analysis. Although we explored probe aggregation methods to improve probing performance, these yielded only minor improvements. We provide the full set of aggregation results in Appendix ~\ref{app:probeagg}.
+
+Overall, our findings highlight both the promise and limitations of probing for reasoning-specific features, and motivate future experiments in steering and scalable approximations to PTS.
+
+
+
+% \begin{ack}
+% Use unnumbered first level headings for the acknowledgments. All acknowledgments
+% go at the end of the paper before the list of references. Moreover, you are required to declare
+% funding (financial activities supporting the submitted work) and competing interests (related financial activities outside the submitted work).
+% More information about this disclosure can be found at: \url{https://neurips.cc/Conferences/2025/PaperInformation/FundingDisclosure}.
+
+
+% Do {\bf not} include this section in the anonymized submission, only in the final paper. You can use the \texttt{ack} environment provided in the style file to automatically hide this section in the anonymized submission.
+% \end{ack}
+
+% \section*{References}
+
+
+% References follow the acknowledgments in the camera-ready paper. Use unnumbered first-level heading for
+% the references. Any choice of citation style is acceptable as long as you are
+% consistent. It is permissible to reduce the font size to \verb+small+ (9 point)
+% when listing the references.
+% Note that the Reference section does not count towards the page limit.
+% \medskip
+
+
+{
+\small
+
+
+% [1] Alexander, J.A.\ \& Mozer, M.C.\ (1995) Template-based algorithms for
+% connectionist rule extraction. In G.\ Tesauro, D.S.\ Touretzky and T.K.\ Leen
+% (eds.), {\it Advances in Neural Information Processing Systems 7},
+% pp.\ 609--616. Cambridge, MA: MIT Press.
+
+
+% [2] Bower, J.M.\ \& Beeman, D.\ (1995) {\it The Book of GENESIS: Exploring
+%   Realistic Neural Models with the GEneral NEural SImulation System.}  New York:
+% TELOS/Springer--Verlag.
+
+
+% [3] Hasselmo, M.E., Schnell, E.\ \& Barkai, E.\ (1995) Dynamics of learning and
+% recall at excitatory recurrent synapses and cholinergic modulation in rat
+% hippocampal region CA3. {\it Journal of Neuroscience} {\bf 15}(7):5249-5262.
+}
+
+
+{\small
+\bibliographystyle{unsrtnat}  
+\bibliography{references}   
+}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\appendix
+
+
+\section{Additional Results: Effect of Class Rebalancing}
+\label{app:layer-performance-1to2}
+
+We oversampled negative examples at a 1:2 ratio relative to positives. This adjustment modestly improved accuracy, AUROC, and false positive rates, but increased false negatives. Results for the best-performing layers are shown in Table ~\ref{tab:layer-performance-1to2} below.
+
+\begin{table}[h!]
+\centering
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{c c c c c c c c}
+\toprule
+\textbf{Layer} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{ROC AUC} & \textbf{FPR} & \textbf{FNR} \\
+\midrule
+16 & \textbf{0.800} & 0.750 & \textbf{0.600} & \textbf{0.667} & 0.791 & 0.100 & \textbf{0.400} \\
+14 & 0.790 & 0.760 & 0.543 & 0.633 & \textbf{0.796} & 0.086 & 0.457 \\
+11 & 0.786 & 0.755 & 0.529 & 0.621 & 0.783 & 0.086 & 0.471 \\
+4  & 0.786 & \textbf{0.820} & 0.457 & 0.587 & 0.780 & \textbf{0.050} & 0.543 \\
+\midrule
+\textbf{Avg} & 0.746 & 0.669 & 0.517 & 0.574 & 0.757 & 0.139 & 0.483 \\
+\bottomrule
+\end{tabular}
+\vspace{1em}
+\caption{Top 4 probes on the 1:2 (positive:negative) dataset, ordered best-to-worst by overall performance. Bold indicates the best value per column (note: lower is better for FPR/FNR).}
+\label{tab:layer-performance-1to2}
+\end{table}
+
+
+\section{Activation Visualizations}
+\label{app:visuals}
+
+We provide PCA and t-SNE projections for the best-performing layers under both 1:1 and 1:2 training regimes. These plots illustrate clustering tendencies between pivotal and non-pivotal activations. See Figure ~\ref{fig:pca1} and ~\ref{fig:pca2}.
+
+% Insert your figures here
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.45\textwidth]{pca_plot_1.png}
+    \includegraphics[width=0.45\textwidth]{tsne_plot_1.png}
+    \caption{PCA (left) and t-SNE (right) projections of pivotal vs. non-pivotal activations for best layer under the 1:1 dataset.}
+    \label{fig:pca1}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.45\textwidth]{set2_pca_layer_16.png}
+    \includegraphics[width=0.45\textwidth]{set2_tsne_layer_16.png}
+    \caption{PCA (left) and t-SNE (right) projections of pivotal vs. non-pivotal activations for best layer (16) under the 1:2 dataset.}
+    \label{fig:pca2}
+\end{figure}
+
+
+\section{Probe Aggregation Results}
+\label{app:probeagg}
+
+To complement our layer-wise probe experiments, we evaluated aggregation strategies that combine predictions across multiple probes. These methods include: (1) \textbf{Average Aggregation (AvgAgg)}, where calibrated per-layer probabilities are averaged and compared to a threshold, and (2) \textbf{Majority Rule}, where a token is classified as pivotal if at least $X\%$ of probes predict pivotal. We report results under both balanced (1:1) and imbalanced (2:1 negatives to positives) datasets.
+
+\subsection{Balanced Dataset (1:1)}
+\begin{table}[h!]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{AP} \\
+\midrule
+AvgAgg (best config, k=10, $\tau$=0.476) & \textbf{0.603} & 0.807 & \textbf{0.690} & \textbf{0.707} \\
+Majority Rule (50\% vote) & 0.508 & \textbf{0.862} & 0.639 & 0.501 \\
+\bottomrule
+\end{tabular}
+\vspace{1em}
+\caption{Balanced dataset (1:1). AvgAgg reduces false positives compared to Majority Rule while maintaining strong recall.}
+\end{table}
+
+\textbf{Analysis.} AvgAgg achieves the best F1 and AP, while Majority Rule pushes recall highest at the expense of a large false positive explosion (FP = 91 vs. 58). Both methods confirm pivotalness is separable across layers, but balancing strongly favors AvgAgg.
+
+\subsection{Imbalanced Dataset (2:1 negatives to positives)}
+\begin{table}[h!]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{AP} \\
+\midrule
+AvgAgg & 0.636 & \textbf{0.862} & \textbf{0.732} & \textbf{0.840} \\
+Majority Rule (75\% vote) & \textbf{0.967} & 0.446 & 0.611 & \textbf{0.840} \\
+\bottomrule
+\end{tabular}
+\vspace{1em}
+\caption{Imbalanced dataset (2:1). Majority Rule becomes overly conservative, while AvgAgg maintains a balanced trade-off.}
+\end{table}
+
+\textbf{Analysis.} AvgAgg again provides the best balance of recall and precision. Majority Rule achieves nearly perfect precision (0.967) but recall collapses, missing more than half of the pivotal tokens.
+
+\subsection{Threshold Sensitivity}
+
+We conducted a sweep over decision thresholds $\tau$ for the weighted average aggregation 
+configuration to examine how calibration impacts performance on the balanced validation set. 
+Figure~\ref{fig:threshold_sweep_plot} illustrates the trade-offs between precision, recall, and false positives 
+as $\tau$ varies.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.9\linewidth]{threshold_vs_metrics_img.png}
+    \caption{Threshold sweep curves for weighted average aggregation on the balanced validation dataset.
+    Top: Precision vs. threshold. Middle: Recall vs. threshold. Bottom: False positives vs. threshold.
+    Precision rises steadily as thresholds increase, while recall falls sharply. False positives drop
+    smoothly as $\tau$ increases.}
+    \label{fig:threshold_sweep_plot}
+\end{figure}
+
+\textbf{Analysis.} 
+At low thresholds ($\tau \leq 0.30$), recall saturates at 1.0 but precision remains low ($\approx 0.49$),
+leading to high false positive counts. As $\tau$ increases toward 0.40--0.47, precision improves 
+(0.52--0.60) with only a modest drop in recall (0.81--0.99), yielding the best F1 trade-offs. 
+Beyond $\tau=0.55$, recall collapses and F1 deteriorates rapidly, while precision spikes as high as 1.0 
+with almost no false positives. These results confirm that probe aggregation is highly threshold-sensitive, 
+and calibration is critical for balancing false positive minimization against recall preservation.
+
+\subsection{Discussion}
+Probe aggregation smooths layer variability and highlights clear trade-offs:
+\begin{itemize}
+    \item AvgAgg emphasizes recall while tolerating more false positives.
+    \item Majority Rule is highly threshold- and distribution-sensitive: liberal under 1:1, conservative under 2:1.
+    \item A small threshold sweep further showed that AvgAgg’s performance is highly calibration-sensitive: lower thresholds maximize recall (up to 1.0) at the cost of precision, while higher thresholds nearly eliminate false positives but collapse recall.
+\end{itemize}
+Overall, AvgAgg emerges as the most stable aggregation method, with Majority Rule useful only when minimizing false positives is the overriding priority, and threshold calibration essential for balancing precision-recall trade-offs.
+
+\section{Alternative Training: Cost-Sensitive Probes}
+
+As an exploratory baseline, we trained cost-sensitive probes by weighting pivotal token misclassifications more heavily in the loss. This allows recall prioritization while attempting to suppress false positives. We again report results for balanced vs. imbalanced datasets.
+
+\subsection{Balanced Dataset (1:1)}
+\begin{table}[h!]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{AP} \\
+\midrule
+Standard Probe & 0.610 & 0.790 & 0.690 & 0.720 \\
+Cost-Sensitive (best config, $nw=1.5$) & \textbf{0.671} & \textbf{0.815} & \textbf{0.736} & \textbf{0.819} \\
+\bottomrule
+\end{tabular}
+\vspace{1em}
+\caption{Balanced dataset (1:1). Cost-sensitive training reduces false positives compared to baseline.}
+\end{table}
+
+\textbf{Analysis.} The best cost-sensitive configuration reduced FPs (26 vs. 45) while improving both precision and AP compared to standard probes.
+
+\subsection{Imbalanced Dataset (2:1 negatives to positives)}
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{AP} \\
+\midrule
+AvgAgg (from A.2) & 0.636 & \textbf{0.862} & 0.732 & \textbf{0.840} \\
+Cost-Sensitive ($nw=1.0$) & \textbf{0.644} & \textbf{0.862} & \textbf{0.737} & 0.835 \\
+\bottomrule
+\end{tabular}
+\vspace{1em}
+\caption{Imbalanced dataset (2:1). Cost-sensitive probes behave similarly to AvgAgg but slightly reduce false positives.}
+\end{table}
+
+\textbf{Analysis.} On imbalanced data, cost-sensitive training closely tracks AvgAgg: high recall, modest FP reduction, with nearly identical F1/AP.
+
+\subsection{Discussion}
+Cost-sensitive probes provide a balanced compromise, especially under class imbalance. On balanced data, they achieved the overall best trade-off (F1 = 0.736, AP = 0.819). On imbalanced data, their behavior closely matches AvgAgg, but without significant gains. Given added complexity (hyperparameter sweeps for weights and thresholds), we consider cost-sensitive training an exploratory complement rather than a main method.
+
+\end{document}

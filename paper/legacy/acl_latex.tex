@@ -1,0 +1,250 @@
+\documentclass[11pt]{article}
+
+% Change "review" to "final" to generate the final (sometimes called camera-ready) version.
+% Change to "preprint" to generate a non-anonymous version with page numbers.
+\usepackage[preprint]{acl}
+
+%table packages
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{adjustbox}
+\usepackage{caption}
+
+\sisetup{
+  table-format=1.3,
+  table-number-alignment=center,
+  detect-weight=true,
+  detect-family=true
+}
+
+% Standard package includes
+\usepackage{times}
+\usepackage{latexsym}
+
+% For proper rendering and hyphenation of words containing Latin characters (including in bib files)
+\usepackage[T1]{fontenc}
+% For Vietnamese characters
+% \usepackage[T5]{fontenc}
+% See https://www.latex-project.org/help/documentation/encguide.pdf for other character sets
+
+% This assumes your files are encoded as UTF8
+\usepackage[utf8]{inputenc}
+
+% This is not strictly necessary, and may be commented out,
+% but it will improve the layout of the manuscript,
+% and will typically save some space.
+\usepackage{microtype}
+
+% This is also not strictly necessary, and may be commented out.
+% However, it will improve the aesthetics of text in
+% the typewriter font.
+\usepackage{inconsolata}
+
+%Including images in your LaTeX document requires adding
+%additional package(s)
+\usepackage{graphicx}
+
+% If the title and author information does not fit in the area allocated, uncomment the following
+%
+%\setlength\titlebox{<dim>}
+%
+% and set <dim> to something 5cm or larger.
+
+\usepackage{amsmath} 
+\usepackage{amssymb}
+
+
+
+\title{Pivotal Tokens Encode Reasoning Shifts in Large Language Models}
+
+% Author information can be set in various styles:
+% For several authors from the same institution:
+% \author{Author 1 \and ... \and Author n \\
+%         Address line \\ ... \\ Address line}
+% if the names do not fit well on one line use
+%         Author 1 \\ {\bf Author 2} \\ ... \\ {\bf Author n} \\
+% For authors from different institutions:
+% \author{Author 1 \\ Address line \\  ... \\ Address line
+%         \And  ... \And
+%         Author n \\ Address line \\ ... \\ Address line}
+% To start a separate ``row'' of authors use \AND, as in
+% \author{Author 1 \\ Address line \\  ... \\ Address line
+%         \AND
+%         Author 2 \\ Address line \\ ... \\ Address line \And
+%         Author 3 \\ Address line \\ ... \\ Address line}
+
+% \author{First Author \\
+%   Affiliation / Address line 1 \\
+%   Affiliation / Address line 2 \\
+%   Affiliation / Address line 3 \\
+%   \texttt{email@domain} \\\And
+%   Second Author \\
+%   Affiliation / Address line 1 \\
+%   Affiliation / Address line 2 \\
+%   Affiliation / Address line 3 \\
+%   \texttt{email@domain} \\}
+
+% \author{
+%  \textbf{Steven Ngo\textsuperscript{1,8},*},
+%  \textbf{Taiwo Omoya\textsuperscript{2,8}},
+%  \textbf{Zurabi Kochiashvili\textsuperscript{3,8}},
+%  \textbf{Dylan T. Tran\textsuperscript{4,8}},
+% \\
+%  % \textbf{Aryaman Sarda\textsuperscript{5,9}},
+%  \textbf{Cole Blondin\textsuperscript{5,8}},
+%  \textbf{Kevin Zhu\textsuperscript{6,8}},
+%  \textbf{Sean O. Brian \textsuperscript{7,8}},
+% \\
+
+\author{%
+Steven Ngo\thanks{First Author} \quad Taiwo Omoya \quad Zurabi Kochiashvili \quad Dylan T. Tran \quad \\
+\textbf{Cole Blondin}\thanks{Senior Author} \quad \textbf{Sean O'Brien}\footnotemark[2] \quad \textbf{Kevin Zhu}\footnotemark[2]
+\\
+Algoverse AI Research\\
+\texttt{svngo@ucsd.edu, kevin@algoverse.us}
+}
+%  \textbf{Ninth Author\textsuperscript{1}},
+%  \textbf{Tenth Author\textsuperscript{1}},
+%  \textbf{Eleventh E. Author\textsuperscript{1,2,3,4,5}},
+%  \textbf{Twelfth Author\textsuperscript{1}},
+% \\
+%  \textbf{Thirteenth Author\textsuperscript{3}},
+%  \textbf{Fourteenth F. Author\textsuperscript{2,4}},
+%  \textbf{Fifteenth Author\textsuperscript{1}},
+%  \textbf{Sixteenth Author\textsuperscript{1}},
+% \\
+%  \textbf{Seventeenth S. Author\textsuperscript{4,5}},
+%  \textbf{Eighteenth Author\textsuperscript{3,4}},
+%  \textbf{Nineteenth N. Author\textsuperscript{2,5}},
+%  \textbf{Twentieth Author\textsuperscript{1}}
+% \\
+% \\
+%  \textsuperscript{1}University of California, San Diego,
+%  \textsuperscript{2}Hudson Valley Community College, \\
+%  \textsuperscript{3}Stony Brook University, 
+%  \textsuperscript{4}University of California, Irvine, \\
+%  \textsuperscript{8}Algoverse AI Research
+% \\
+%  \small{
+%    \textbf{Correspondence:} \href{svngo@ucsd.edu}{svngo@ucsd.edu}
+%  }
+% }
+
+\begin{document}
+\maketitle
+\begin{abstract}
+
+As large language models (LLMs) continue to scale in reasoning capability, the mechanisms by which their internal representations encode Chain-of-Thought (CoT) behaviors remain poorly understood. Prior work has utilized Pivotal Token Search to identify pivotal tokens—intermediate logits within a reasoning trajectory that substantially influence the probability of a correct final answer to a given query—but none have formulated methods for interpreting these tokens. In this work, we present a novel linear probing method to predict and classify pivotal features underlying Qwen3-0.6B activations. We find that these features correspond to consistent, weighted directions in the latent space across multiple layers, such that attending to these directions may elicit different behaviors in the language model's reasoning path. Our repository can be found \href{https://github.com/stvngo/Algoverse-AI-Model-Probing}{here.}
+
+% This structure enables aggregation of probes and targeted steering of generation outputs towards higher answer success, suggesting new pathways for improving reasoning performance through mechanistic interventions. Our repository can be found \href{https://github.com/stvngo/Algoverse-AI-Model-Probing}{here}
+\end{abstract}
+
+\section{Introduction}
+Large language models (LLMs) have demonstrated exceptional reasoning abilities when prompted with Chain-of-Thought (CoT) examples \cite{wei2023chainofthoughtpromptingelicitsreasoning}. While this capability has been extensively studied at the behavioral level, the internal mechanisms by which LLMs represent and execute multi-step reasoning behavior remain poorly understood. \citet{abdin2024phi4technicalreport} introduced Pivotal Token Search (PTS), a technique leveraging a binary search algorithm and an oracle to identify “pivotal tokens”—intermediate tokens in the reasoning path that strongly influence a model’s likelihood of arriving at the correct answer by dramatically shifting the probability of a successful generation. These pivotal tokens have proved to steer models towards better reasoning success by enhancing standard Direct Preference Optimization (DPO) fine-tuning \citep{lin2025criticaltokensmattertokenlevel,abdin2024phi4technicalreport}. However, there is no systematic method for interpreting the reasoning features they encode. Without understanding which tokens guide reasoning trajectories, improving model accuracy in tasks requiring logical progression becomes increasingly difficult. By identifying pivotal tokens during a model's generated outputs, we can pinpoint the exact moments where the model's reasoning succeeds or fails. In this work, we refine a dataset of pivotal tokens and their surrounding contexts, and propose a novel linear probing approach to classify pivotal features in the activations of Qwen3-0.6B and predict whether the \emph{next} token is pivotal. Our results show that these features correspond to consistent directions in the latent space across multiple layers. 
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.45\textwidth]{pca_plot_1.png}
+    \includegraphics[width=0.45\textwidth]{tsne_plot_1.png}
+    \caption{PCA (top) and t-SNE (bottom) projections of pivotal vs. non-pivotal activations for the best layer.}
+    \label{fig:pca1}
+\end{figure}
+
+We suspect that manipulating or attending to these directions can steer the model’s reasoning path—for example, increasing its “skepticism” toward incorrect intermediate steps. This structure also enables aggregation of probes \citep{zhu2025project_probe_aggregate, beaglehole2025universalsteeringmonitoringai} and possible targeted steering of generation outputs \citep{huang2024steering, subramani2022extractinglatentsteeringvectors} towards higher answer success, suggesting new pathways for improving reasoning performance through mechanistic interventions. 
+
+The original PTS algorithm relies on a binary search procedure over a model's generation to locate pivotal tokens \citep{abdin2024phi4technicalreport,pts}. While effective, this process is computationally expensive, requiring repeated forward passes through the model for each candidate token position, scaling poorly with both sequence length and the number of queries. By contrast, linear probes offer a lightweight alternative by instantly assigning probabilities of pivotality to all token positions from a single forward pass, eliminating the need for iterative search. This could substantially reduce both inference time and compute cost, especially in large-scale settings where thousands of generations must be analyzed. 
+
+\section{Methodology}
+
+\subsection{Dataset}
+
+We use the open-source PTS dataset of \citet{codelionQwen3}, which consists of 1,376 rows from Qwen3-0.6B generations in GSM8K annotated with pivotal tokens (104 unique queries). Multiple pivotal tokens may occur within a single generation, producing contexts that are prefixes to each other. We do not compile a new dataset, but instead preprocess this resource to construct balanced token-level examples for probing.
+
+For each query, we retain the longest \texttt{pivot\_context} as the base example. The token immediately preceding each pivotal token (where its context is a prefix of the longest context) is labeled $1$ (\emph{pivotal}), while an equal number of non-pivotal positions ($0$) are sampled from the generated portion of the answer (i.e., excluding the query and already labeled positive positions). All other tokens are labeled $-1$, and we append $k{=}5$ random tokens to mitigate end-of-sequence bias. Here, $\mathcal{P}$ denotes the set of pivotal positions and $\mathcal{N}$ the set of sampled non-pivotal positions, such that $|\mathcal{N}| = |\mathcal{P}|$ and $\mathcal{N} \cup \mathcal{P} = \varnothing$. 
+
+Formally, for $C_{\text{long}} = [t_1,\dots,t_{n+k}]$, the label sequence $L \in \{-1,0,1\}^{n+k}$ is defined by
+\[
+L_i =
+\begin{cases}
+1 & \text{if } i \in \mathcal{P} \\
+0 & \text{if } i \in \mathcal{N} \\
+-1 & \text{otherwise.}
+\end{cases}
+\]
+
+After an 80/20 training and validation split, this yields 83 training and 21 validation examples, each with a list of labels corresponding to each token position in the string: \texttt{longest\_pivot\_context + pivot\_token + appended\_tokens}. After activation extraction, we culminate 232 pivotal and 232 non-pivotal position activations balanced across 29 layers.
+
+\subsection{Linear Probe Architecture}
+
+The probe architecture is a simple linear classifier \cite{alain2018understandingintermediatelayersusing}. It consists of a single linear layer that takes the hidden state vector from a specific layer of the language model as input and outputs a single scalar value. \[
+z_{\ell,i} \;=\; \mathbf{w}_\ell^\top \mathbf{h}_{\ell,i} + b_\ell,
+\]
+This output is then passed through a sigmoid function to get a probability score for classifying the \emph{following} token position as pivotal or non-pivotal.
+
+\[
+p_{\ell,i} \;=\; \sigma\!\left(z_{\ell,i}\right) \;=\; \frac{1}{1 + e^{-z_{\ell,i}}}.
+\]
+
+We predict this target with threshold $\tau$ (default $\tau{=}0.5$):
+\[
+\hat{y}_{\ell,i} \;=\; \mathbb{I}\!\left[p_{\ell,i} \ge \tau\right].
+\]
+
+\subsection{Layer-wise Probe Training and Evaluation}
+For all 29 layers of Qwen3-0.6B, we train a classification probe on the activations to predict our target, which we devise as \texttt{is\_pivotal}. First, we prepare the pivotal and non-pivotal examples into $(x,y)$ pairs, where $x$ is the model activation vector at any given layer and $y$ is the ground-truth label. We create shuffled mini-batches of size 16 for training, as well as non-shuffled batches for validation. The probes are trained for a fixed number of epochs (10) on the prepared training data for the current layer, via a criterion of Binary Cross-Entropy Loss, i.e. \[
+\mathcal{L} \;=\; -\frac{1}{N}\sum_{i=1}^N \Big( y_i \log \hat{p}_i + (1-y_i)\log (1-\hat{p}_i) \Big),\]
+and the Adam optimizer with a learning rate of 0.001 employed to update weights. We evaluate threshold accuracy on the validation loader and report metrics across all layers, including accuracy, precision, recall, F1, ROC AUC, and confusion matrices (when both classes are present).
+
+\subsection{Limitations of Methods}
+While our probing approach provides an interpretable test for pivotal feature encoding, several limitations must be acknowledged. First, the dataset size is relatively small (83 training and 21 validation examples), which restricts statistical power and may lead to overfitting despite the simplicity of linear probes. Second, our probes are trained independently per layer, without cross-layer aggregation; this may overlook distributed representations of pivotalness that only emerge across multiple layers. Third, we restrict ourselves to a binary classification task, excluding neutral tokens. While this simplifies training, it may miss subtler gradations in how tokens contribute to reasoning. Fourth, we do not use any baselines for our study, like saliency maps \cite{ismail2021improvingdeeplearninginterpretability}. Finally, linear probes, by design, only test for linearly separable features. Nonlinear or interaction effects may exist but remain outside the scope of this study. 
+
+These limitations suggest that our results should be interpreted as \textit{preliminary} evidence of linearly separable pivotal directions, rather than a comprehensive characterization of how models encode reasoning steps.
+
+\section{Preliminary Results}
+
+Table \ref{tab:layer-performance} summarizes the results. Layer 14 achieved the best overall balance across metrics, with an F1 of 0.732 and ROC AUC of 0.802. Later layers, such as 16, 17, and 27, showed stronger recall and reduced false negative rates, suggesting that pivotal token representations become more linearly separable in the mid-to-late transformer blocks. Across all layers, ROC AUC values (average 0.747) consistently exceeded raw accuracy, indicating that although the probes capture useful directions, threshold-dependent metrics are less stable on this dataset. Figure \ref{fig:pca1} shows the projections of pivotal and non-pivotal activations for layer 14.
+
+\begin{table}[h]
+\centering
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.3}
+\adjustbox{max width=\columnwidth}{%
+\begin{tabular}{c S S S S S S S}
+\toprule
+\multicolumn{1}{c}{Layer} &
+\multicolumn{1}{c}{Accuracy} &
+\multicolumn{1}{c}{Precision} &
+\multicolumn{1}{c}{Recall} &
+\multicolumn{1}{c}{F1} &
+\multicolumn{1}{c}{ROC AUC} &
+\multicolumn{1}{c}{FPR} &
+\multicolumn{1}{c}{FNR} \\
+\midrule
+14 & \bfseries 0.746 & \bfseries 0.776 & 0.692 & \bfseries 0.732 & \bfseries 0.802 & \bfseries 0.200 & 0.308 \\
+16 & 0.708 & 0.702 & \bfseries 0.723 & 0.712 & 0.791 & 0.308 & \bfseries 0.277 \\
+17 & 0.723 & 0.723 & \bfseries 0.723 &  0.723 & 0.793 & 0.277 & \bfseries 0.277 \\
+27 & 0.708 & 0.702 & \bfseries 0.723 & 0.712 & 0.715 & 0.308 & \bfseries 0.277 \\
+\midrule
+Avg & 0.686 & 0.692 & 0.672 & 0.676 & 0.747 & 0.316 & 0.328 \\
+\bottomrule
+\end{tabular}
+}
+
+\caption{Performance metrics for top 4 layers and average scores across all layers. The best value in each metric column is bolded.}
+\label{tab:layer-performance}
+\end{table}
+
+\section{Discussion}
+
+Our results show that linear probes trained on Qwen3-0.6B activations are capable of distinguishing partially consistent directions across multiple intermediate layers, with the strongest performance concentrated in the middle of the network (e.g., Layers 14–16). These findings provide small evidence that the property of \textit{pivotalness} is encoded in linearly separable directions within the model’s representation space. 
+
+While the probes themselves are diagnostic tools, they also open up hypotheses for future work. First, the directions identified by the probes could potentially be used for \textit{steering}: intervening on hidden activations to amplify or suppress pivotal features. Such interventions may alter reasoning trajectories, for example by introducing “skepticism” about low-confidence reasoning paths or reinforcing high-confidence steps. Second, because PTS requires multiple forward passes and oracle queries, probe-based classification represents a lightweight alternative for identifying pivotal tokens at runtime. This could enable applications where efficiency is critical, such as real-time reasoning analysis. 
+
+Although we explored probe aggregation methods to improve probing performance, those yielded only negligible improvements. Overall, our findings highlight both the promise and limitations of probing for reasoning-specific features, and motivate future experiments in steering and scalable approximations to PTS.
+
+\nocite{*} 
+\bibliographystyle{acl_natbib}
+\bibliography{custom}
+
+
+\end{document}

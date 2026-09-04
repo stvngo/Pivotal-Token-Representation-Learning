@@ -1,0 +1,14 @@
+# GPU-only extras. Linux + CUDA (Colab, or the remote Blackwell box).
+# Not installable on macOS/MPS -- the local dev path uses the HF rollout
+# backend instead, and the ScriptedBackend for tests.
+#
+#   pip install -r requirements.txt -r requirements-gpu.txt
+
+# vLLM powers the PTS rollout backend. Rollout generation is ~95% of PTS
+# cost; continuous batching across bisection nodes and queries is what
+# takes the Qwen3-0.6B run from ~90h to ~4.5h on one A100.
+vllm>=0.11.0
+
+# Optional: faster attention for activation extraction. Needs CUDA
+# compute capability >= 8.0 (A100/L4/H100/Blackwell yes, T4 no).
+# flash-attn>=2.7.0
