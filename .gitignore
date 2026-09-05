@@ -50,6 +50,10 @@ results/
 
 # Cached activations / generated datasets
 data/**/*.pth
+data/**/*.safetensors
+data/**/*.meta.json
+# PTS run state: checkpointed to a HuggingFace dataset repo, not to git
+runs/
 data/**/cached_activations*/
 data/**/cached_activations_*
 data/**/cached_activations_*/

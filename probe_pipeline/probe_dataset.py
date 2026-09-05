@@ -516,3 +516,97 @@ def split_by_query(
     train = [r for r in rows if r.query_id not in test_ids]
     test = [r for r in rows if r.query_id in test_ids]
     return train, test
+
+
+# --------------------------------------------------------------------------
+# our own harness output
+# --------------------------------------------------------------------------
+
+
+def build_rows_from_harness_events(
+    events: Iterable[Mapping[str, Any]],
+    *,
+    negative_to_positive_ratio: float = 1.0,
+    seed: int = 42,
+    answer_start_from_prompt: bool = True,
+) -> tuple[list[ProbeRow], BuildStats]:
+    """Build probe rows from ``pts_harness`` events.
+
+    Simpler and exact, compared with the released-dataset path: our events
+    carry ``sequence_token_ids`` and an absolute ``position``, so t-1 is
+    ``position - 1`` and nothing is recovered by re-tokenizing. No BPE merge
+    hazard, no string prefix matching, no dropped rows.
+
+    One row per (question, searched rollout). Rollouts of the same question
+    keep the same ``query_id`` so the train/test split stays question-level.
+    """
+    grouped: dict[tuple[str, int], list[Mapping[str, Any]]] = defaultdict(list)
+    for ev in events:
+        grouped[(str(ev["query_uid"]), int(ev.get("generation_index", 0)))].append(ev)
+
+    stats = BuildStats(
+        groups=len({k[0] for k in grouped}),
+        rows_in=sum(len(v) for v in grouped.values()),
+    )
+    out: list[ProbeRow] = []
+
+    for (uid, gen_idx), evs in sorted(grouped.items()):
+        tokens = list(evs[0]["sequence_token_ids"])
+        prompt_len = int(evs[0].get("prompt_len", 0))
+        # The last prompt token is a legitimate t-1: the first generated
+        # token can itself be pivotal.
+        answer_start = max(0, prompt_len - 1) if answer_start_from_prompt else 0
+
+        pivot_positions: set[int] = set()
+        meta: dict[int, tuple[float, bool]] = {}
+        for ev in evs:
+            pos = int(ev["position"])
+            if pos < 1 or pos >= len(tokens):
+                stats.dropped_pivot_at_zero += 1
+                continue
+            pivot_positions.add(pos)
+            meta[pos] = (float(ev.get("prob_delta", 0.0)), bool(ev.get("is_positive", False)))
+            stats.located_from_position += 1
+            stats.rows_used += 1
+
+        t_minus_1 = {p - 1 for p in pivot_positions}
+        if not t_minus_1:
+            stats.groups_empty += 1
+            continue
+
+        excluded = t_minus_1 | pivot_positions
+        candidates = [i for i in range(answer_start, len(tokens)) if i not in excluded]
+        rng = _query_rng(seed, f"{uid}#{gen_idx}")
+        n_take = min(max(int(round(len(t_minus_1) * negative_to_positive_ratio)), 0), len(candidates))
+        sampled = (
+            {int(i) for i in rng.choice(np.array(candidates), size=n_take, replace=False)}
+            if n_take > 0
+            else set()
+        )
+
+        labels = [LABEL_UNUSED] * len(tokens)
+        prob_delta = [0.0] * len(tokens)
+        is_positive = [False] * len(tokens)
+        for p in sorted(t_minus_1):
+            labels[p] = LABEL_PIVOTAL
+            prob_delta[p], is_positive[p] = meta.get(p + 1, (0.0, False))
+        for p in sampled:
+            if labels[p] != LABEL_PIVOTAL:
+                labels[p] = LABEL_NON_PIVOTAL
+
+        row = ProbeRow(
+            query_id=uid,
+            token_ids=tokens,
+            labels=labels,
+            answer_start=answer_start,
+            prob_delta=prob_delta,
+            is_positive=is_positive,
+            branch=gen_idx,
+        )
+        stats.branches += 1
+        stats.pivotal_positions += row.n_pivotal
+        stats.non_pivotal_positions += row.n_non_pivotal
+        stats.per_query_pivots.append(row.n_pivotal)
+        out.append(row)
+
+    return out, stats

@@ -347,3 +347,77 @@ def test_split_is_at_the_question_level():
     assert train_ids and test_ids
     assert not (train_ids & test_ids)
     assert len(train_ids | test_ids) == 10
+
+
+# -- our own harness output ------------------------------------------------
+
+
+def harness_event(uid, gen, position, seq, prompt_len, delta=0.5):
+    return {
+        "query_uid": uid,
+        "generation_index": gen,
+        "position": position,
+        "token_id": seq[position],
+        "sequence_token_ids": seq,
+        "prompt_len": prompt_len,
+        "prob_delta": delta,
+        "is_positive": delta > 0,
+    }
+
+
+def test_harness_events_need_no_retokenization():
+    """Our own events carry an absolute position, so t-1 is position-1
+    exactly -- none of the BPE-merge recovery applies."""
+    from probe_pipeline.probe_dataset import build_rows_from_harness_events
+
+    seq = list(range(200, 220))
+    rows, stats = build_rows_from_harness_events(
+        [harness_event("q1", 0, 12, seq, prompt_len=4)]
+    )
+    assert len(rows) == 1
+    assert rows[0].positions(LABEL_PIVOTAL) == [11]
+    assert rows[0].token_ids[12] == seq[12]
+    assert stats.located_from_position == 1
+    assert stats.dropped_unlocatable == 0
+
+
+def test_harness_rollouts_of_one_question_share_a_query_id():
+    """Otherwise branches of the same question would straddle the split."""
+    from probe_pipeline.probe_dataset import build_rows_from_harness_events
+
+    seq_a, seq_b = list(range(200, 220)), list(range(300, 320))
+    rows, stats = build_rows_from_harness_events(
+        [
+            harness_event("q1", 0, 12, seq_a, 4),
+            harness_event("q1", 1, 9, seq_b, 4),
+        ]
+    )
+    assert len(rows) == 2
+    assert {r.query_id for r in rows} == {"q1"}
+    assert {r.branch for r in rows} == {0, 1}
+    assert stats.branches == 2
+
+
+def test_harness_negatives_respect_the_ratio_and_exclusions():
+    from probe_pipeline.probe_dataset import build_rows_from_harness_events
+
+    seq = list(range(200, 260))
+    rows, _ = build_rows_from_harness_events(
+        [harness_event("q1", 0, 30, seq, 4)], negative_to_positive_ratio=3.0
+    )
+    row = rows[0]
+    assert row.n_non_pivotal == 3
+    negatives = set(row.positions(LABEL_NON_PIVOTAL))
+    assert 29 not in negatives and 30 not in negatives
+    assert min(negatives) >= 3  # prompt_len - 1
+
+
+def test_harness_carries_sign_through():
+    from probe_pipeline.probe_dataset import build_rows_from_harness_events
+
+    seq = list(range(200, 220))
+    rows, _ = build_rows_from_harness_events(
+        [harness_event("q1", 0, 12, seq, 4, delta=-0.31)]
+    )
+    assert rows[0].prob_delta[11] == pytest.approx(-0.31)
+    assert rows[0].is_positive[11] is False

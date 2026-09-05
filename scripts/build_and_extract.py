@@ -32,7 +32,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default="Qwen/Qwen3-0.6B")
-    p.add_argument("--pts-dataset", default="codelion/Qwen3-0.6B-pts")
+    p.add_argument("--pts-dataset", default="codelion/Qwen3-0.6B-pts",
+                   help="released HF events; positions are recovered by re-tokenizing")
+    p.add_argument("--pts-events", default=None,
+                   help="events.jsonl from our own pts_harness run. Preferred: "
+                        "these carry exact positions, so nothing is inferred.")
     p.add_argument("--revision", default=None, help="pin the PTS dataset revision")
     p.add_argument("--out", default="data/acts_v2")
     p.add_argument("--tag", default=None, help="filename prefix (default: model basename)")
@@ -71,6 +75,7 @@ def main() -> None:
     from probe_pipeline.extract_v2 import run_extraction
     from probe_pipeline.probe_dataset import (
         build_probe_dataset,
+        build_rows_from_harness_events,
         normalize_pts_rows,
         split_by_query,
     )
@@ -79,16 +84,28 @@ def main() -> None:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[1/4] tokenizer + PTS rows  ({args.pts_dataset})")
+    source = args.pts_events or args.pts_dataset
+    print(f"[1/4] tokenizer + PTS events  ({source})")
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    ds = load_dataset(args.pts_dataset, split="train", revision=args.revision)
-    rows = normalize_pts_rows(dict(r) for r in ds)
-    print(f"      {len(ds)} events -> {len(rows)} token events")
 
-    print("[2/4] building probe rows")
-    built, stats = build_probe_dataset(
-        rows, tokenizer, negative_to_positive_ratio=args.ratio, seed=args.seed
-    )
+    if args.pts_events:
+        # Our own run: exact positions, no re-tokenization, no merge hazard.
+        from probe_pipeline.artifacts_io import iter_jsonl
+
+        events = list(iter_jsonl(Path(args.pts_events)))
+        print(f"      {len(events)} harness events")
+        print("[2/4] building probe rows (exact positions)")
+        built, stats = build_rows_from_harness_events(
+            events, negative_to_positive_ratio=args.ratio, seed=args.seed
+        )
+    else:
+        ds = load_dataset(args.pts_dataset, split="train", revision=args.revision)
+        rows = normalize_pts_rows(dict(r) for r in ds)
+        print(f"      {len(ds)} events -> {len(rows)} token events")
+        print("[2/4] building probe rows (positions recovered + verified)")
+        built, stats = build_probe_dataset(
+            rows, tokenizer, negative_to_positive_ratio=args.ratio, seed=args.seed
+        )
     print("      " + json.dumps(stats.as_dict()))
     if args.limit:
         built = built[: args.limit]
@@ -125,7 +142,7 @@ def main() -> None:
             dtype=args.store_dtype,
             device=device,
             max_seq_len=args.max_seq_len,
-            source_dataset=args.pts_dataset,
+            source_dataset=source,
         )
         print("      " + json.dumps(summaries[split]))
 

@@ -65,6 +65,8 @@ class PivotEvent:
     position: int                 # absolute, prompt-inclusive
     token_id: int
     prefix_token_ids: list[int]
+    sequence_token_ids: list[int]   # prompt + the whole searched rollout
+    prompt_len: int
     before: ProbEstimate
     after: ProbEstimate
     baseline_p: float
@@ -86,6 +88,10 @@ class PivotEvent:
             "position": self.position,
             "token_id": self.token_id,
             "prefix_len": len(self.prefix_token_ids),
+            # The whole rollout, so downstream builds probe rows from exact
+            # indices instead of recovering them by re-tokenizing text.
+            "sequence_token_ids": self.sequence_token_ids,
+            "prompt_len": self.prompt_len,
             "prob_before": self.before.p,
             "prob_after": self.after.p,
             "prob_delta": self.prob_delta,
@@ -313,6 +319,8 @@ class QueryState:
                     position=len(self.prompt_token_ids) + iv.lo,
                     token_id=self.sequence[iv.lo],
                     prefix_token_ids=list(self._prefix(iv.lo)),
+                    sequence_token_ids=list(self.prompt_token_ids) + list(self.sequence),
+                    prompt_len=len(self.prompt_token_ids),
                     before=before,
                     after=after,
                     baseline_p=self.baseline.p if self.baseline else 0.0,
