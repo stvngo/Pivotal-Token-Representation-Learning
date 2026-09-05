@@ -1,0 +1,62 @@
+{
+  "args": {
+    "model": "Qwen/Qwen3-0.6B",
+    "pts_dataset": "codelion/Qwen3-0.6B-pts",
+    "revision": null,
+    "out": "data/acts_v2",
+    "tag": null,
+    "device": "mps",
+    "dtype": "bfloat16",
+    "store_dtype": "bfloat16",
+    "ratio": 1.0,
+    "test_size": 0.2,
+    "seed": 42,
+    "layers": null,
+    "max_seq_len": null,
+    "limit": null
+  },
+  "build_stats": {
+    "groups": 106,
+    "branches": 425,
+    "rows_in": 1245,
+    "rows_used": 1216,
+    "located_from_position": 0,
+    "located_by_retokenizing": 1244,
+    "dropped_unlocatable": 1,
+    "dropped_not_a_prefix": 0,
+    "dropped_pivot_at_zero": 0,
+    "groups_empty": 0,
+    "pivotal_positions": 1216,
+    "non_pivotal_positions": 1187,
+    "mean_pivots_per_query": 2.8611764705882354,
+    "drop_rate": 0.0008032128514056225
+  },
+  "extraction": {
+    "train": {
+      "path": "data/acts_v2/qwen3-0.6b_train.safetensors",
+      "split": "train",
+      "n_rows": 1963,
+      "n_sequences": 346,
+      "n_layers_kept": 29,
+      "hidden_size": 1024,
+      "dtype": "bfloat16",
+      "max_abs_activation": 418.0,
+      "size_mb": 116.65,
+      "n_truncated": 0,
+      "seconds": 375.8
+    },
+    "test": {
+      "path": "data/acts_v2/qwen3-0.6b_test.safetensors",
+      "split": "test",
+      "n_rows": 440,
+      "n_sequences": 79,
+      "n_layers_kept": 29,
+      "hidden_size": 1024,
+      "dtype": "bfloat16",
+      "max_abs_activation": 392.0,
+      "size_mb": 26.15,
+      "n_truncated": 0,
+      "seconds": 62.4
+    }
+  }
+}

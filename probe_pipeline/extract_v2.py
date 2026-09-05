@@ -85,6 +85,12 @@ def run_extraction(
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
     )
 
+    # hidden_states[-1] is post-final-norm for Llama/Qwen-style models, so the
+    # LM head applies to it directly.
+    lm_head = model.get_output_embeddings()
+    if lm_head is None:
+        raise ValueError("model has no output embeddings; cannot score uncertainty")
+
     writer = ActivationWriter(out_path, manifest, keep, dtype=dtype)
     n_truncated = 0
     started = time.time()
@@ -102,13 +108,17 @@ def run_extraction(
             continue
 
         ids = torch.tensor([token_ids], dtype=torch.long, device=device)
-        out = model(ids, output_hidden_states=True)
+        # logits_to_keep=1 suppresses the full-sequence LM head. Materializing
+        # (T, 151936) logits for every sequence dominated runtime -- 378 MB of
+        # float32 for a 622-token branch -- and we only need a handful of rows.
+        out = model(ids, output_hidden_states=True, logits_to_keep=1)
 
-        # Next-token uncertainty at the labelled positions. The logits are
-        # already computed, so the entropy / top-2-margin baselines cost
-        # nothing here and would otherwise need a second pass over the data.
+        # Next-token uncertainty at the labelled positions, computed by
+        # applying the LM head to just those rows. These are the baselines the
+        # probe has to beat, so capturing them here avoids a second pass.
         pos_t = torch.tensor(positions, dtype=torch.long, device=device)
-        logits = out.logits[0].index_select(0, pos_t).float()
+        final_hidden = out.hidden_states[-1][0].index_select(0, pos_t)
+        logits = lm_head(final_hidden).float()
         logprobs = torch.log_softmax(logits, dim=-1)
         probs = logprobs.exp()
         entropy = -(probs * logprobs).sum(-1)
