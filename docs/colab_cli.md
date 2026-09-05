@@ -93,6 +93,65 @@ one, and the keep-alive daemon inherits whatever `--auth` was used.
 
 ---
 
+## Getting vLLM running (the fiddly part)
+
+On a fresh G4 session, in this order:
+
+```bash
+scripts/colab install -s <name> vllm
+```
+
+then, once, on the VM:
+
+```bash
+pip install torchvision --index-url https://download.pytorch.org/whl/cu130
+```
+
+Three separate breakages, each with a non-obvious cause:
+
+1. **`ImportError: libcudart.so.13`.** vLLM 0.28 is built for CUDA 13;
+   Colab's toolkit is 12.8. The library it needs ships *inside torch* at
+   `nvidia/cu13/lib/libcudart.so.13`, so importing `torch` before `vllm`
+   resolves it and importing `vllm` first does not. Our backend does this
+   deliberately. Note this also means a stale kernel can mislead you: an
+   `import vllm` that succeeded in a session where torch was already
+   imported will fail in a fresh process. `colab restart-kernel` before
+   concluding anything.
+2. **`Detected that PyTorch and TorchAudio were compiled with different
+   CUDA versions`.** Installing vllm upgrades torch to cu130, orphaning
+   Colab's preinstalled cu128 torchaudio/torchvision. Uninstall
+   torchaudio; *reinstall* torchvision from the cu130 index, because vLLM
+   imports it at engine init and fails with
+   `ModuleNotFoundError: No module named 'torchvision'` otherwise.
+3. **`FlashInfer requires GPUs with sm75 or higher`** on an sm_120 GPU,
+   which plainly satisfies that. A detection bug. The backend defaults
+   `VLLM_ATTENTION_BACKEND=TRITON_ATTN` and
+   `VLLM_USE_FLASHINFER_SAMPLER=0`, both overridable.
+
+Measured once working, Qwen3-0.6B on the G4:
+
+| workload | time | throughput |
+| --- | --- | --- |
+| engine init | 29 s | — |
+| 1 node x 40 rollouts | 3.0 s | 4,280 tok/s |
+| 64 nodes x 40 rollouts | 21.5 s | **38,074 tok/s** |
+
+## Long jobs
+
+`colab exec` streams over a websocket and gives up after a few minutes --
+vLLM spends longer than that compiling for a new architecture before it
+emits a token. Use the job runner, which starts the script under `nohup`
+and polls its log:
+
+```bash
+scripts/colab_job.py -s ptrl-g4 --script scripts/pts_run.py -- --model Qwen/Qwen3-0.6B ...
+scripts/colab_job.py -s ptrl-g4 --status
+scripts/colab_job.py -s ptrl-g4 --tail -n 50
+```
+
+It syncs the repo on the VM from the working branch before starting,
+unless `--no-sync`.
+
 ## Agent notes
 
 The CLI ships its own skill file: `colab skill`. Worth reading; the points
