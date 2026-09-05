@@ -88,15 +88,44 @@ def token_onehot_probe_scores(
 def random_direction_scores(
     x_eval: np.ndarray, *, seed: int = 0, n_directions: int = 1
 ) -> np.ndarray:
-    """Projection onto a random unit direction. The null for 'any direction'."""
+    """Projection onto a single random unit direction.
+
+    The null for "would any direction have done this?". Note that a single
+    draw has expected AUROC 0.5 but real variance, and that variance grows
+    with how separable the classes are overall -- on a well-separated set a
+    lucky direction can reach 0.68. Use :func:`random_direction_auroc` when
+    you need the null *distribution* rather than one sample.
+    """
     rng = np.random.default_rng(seed)
-    d = x_eval.shape[1]
-    acc = np.zeros(len(x_eval))
+    v = rng.normal(size=x_eval.shape[1])
+    return x_eval @ (v / np.linalg.norm(v))
+
+
+def random_direction_auroc(
+    x_eval: np.ndarray, y_eval: np.ndarray, *, seed: int = 0, n_directions: int = 32
+) -> dict[str, float]:
+    """Null distribution of AUROC over independent random directions.
+
+    Averaging the *directions* and projecting once (which an earlier version
+    of this module did) is not the same thing: a sum of random vectors is
+    just another random vector, so that yields one sample, not an average of
+    many. Averaging the resulting AUROCs is what gives a usable null.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    rng = np.random.default_rng(seed)
+    aurocs = []
     for _ in range(n_directions):
-        v = rng.normal(size=d)
-        v /= np.linalg.norm(v)
-        acc += x_eval @ v
-    return acc / n_directions
+        v = rng.normal(size=x_eval.shape[1])
+        aurocs.append(float(roc_auc_score(y_eval, x_eval @ (v / np.linalg.norm(v)))))
+    a = np.asarray(aurocs)
+    return {
+        "mean": float(a.mean()),
+        "p05": float(np.percentile(a, 5)),
+        "p95": float(np.percentile(a, 95)),
+        "max": float(a.max()),
+        "n_directions": n_directions,
+    }
 
 
 def evaluate_baselines(
