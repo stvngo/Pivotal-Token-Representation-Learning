@@ -54,6 +54,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--layers", default=None, help="comma-separated hidden_states indices")
     p.add_argument("--max-seq-len", type=int, default=None)
     p.add_argument("--limit", type=int, default=None, help="cap branches, for smoke runs")
+    p.add_argument("--negatives-anywhere", action="store_true",
+                   help="sample negatives from the whole sequence rather than "
+                        "the pivot-bearing span. Confounds position and "
+                        "entropy with the label; for ablation only.")
+    p.add_argument("--label-offset", type=int, default=-1,
+                   help="position carrying the positive label, relative to the "
+                        "pivot. -1 = t-1, the prediction problem. 0 = the pivot "
+                        "itself, a post-hoc classifier; diagnostic only.")
     return p.parse_args()
 
 
@@ -96,7 +104,9 @@ def main() -> None:
         print(f"      {len(events)} harness events")
         print("[2/4] building probe rows (exact positions)")
         built, stats = build_rows_from_harness_events(
-            events, negative_to_positive_ratio=args.ratio, seed=args.seed
+            events, negative_to_positive_ratio=args.ratio, seed=args.seed,
+            label_offset=args.label_offset,
+            negatives_within_pivot_span=not args.negatives_anywhere,
         )
     else:
         ds = load_dataset(args.pts_dataset, split="train", revision=args.revision)

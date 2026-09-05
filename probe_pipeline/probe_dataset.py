@@ -529,6 +529,8 @@ def build_rows_from_harness_events(
     negative_to_positive_ratio: float = 1.0,
     seed: int = 42,
     answer_start_from_prompt: bool = True,
+    label_offset: int = -1,
+    negatives_within_pivot_span: bool = True,
 ) -> tuple[list[ProbeRow], BuildStats]:
     """Build probe rows from ``pts_harness`` events.
 
@@ -539,6 +541,25 @@ def build_rows_from_harness_events(
 
     One row per (question, searched rollout). Rollouts of the same question
     keep the same ``query_id`` so the train/test split stays question-level.
+
+    ``negatives_within_pivot_span`` restricts negatives to the span where
+    pivots actually occur, and defaults to on because the alternative
+    silently rigs every baseline comparison. Our rollouts run to the token
+    limit, so sampling negatives from the whole sequence draws most of them
+    from the fluent tail *after* the model has committed to an answer:
+    measured on this data, 63% of negatives landed after the last pivot,
+    with mean next-token entropy 0.275 against 0.476 before it. That inflates
+    the entropy baseline from a +0.44 to a +1.14 separation and confounds
+    position with label (negative median position 232 vs pivot median 146).
+    The released datasets do not have this problem only because their stored
+    sequence stops at the deepest pivot.
+
+    ``label_offset`` selects which position carries the positive label,
+    relative to the pivot. ``-1`` (the default) is the prediction problem:
+    read at *t-1*, before the token exists, which is the only version usable
+    during decoding. ``0`` reads at the pivot itself, which is a post-hoc
+    classifier and cannot gate anything -- useful only as a diagnostic, to
+    see how much of the signal is in the token rather than its context.
     """
     grouped: dict[tuple[str, int], list[Mapping[str, Any]]] = defaultdict(list)
     for ev in events:
@@ -569,13 +590,18 @@ def build_rows_from_harness_events(
             stats.located_from_position += 1
             stats.rows_used += 1
 
-        t_minus_1 = {p - 1 for p in pivot_positions}
+        t_minus_1 = {
+            p + label_offset
+            for p in pivot_positions
+            if 0 <= p + label_offset < len(tokens)
+        }
         if not t_minus_1:
             stats.groups_empty += 1
             continue
 
         excluded = t_minus_1 | pivot_positions
-        candidates = [i for i in range(answer_start, len(tokens)) if i not in excluded]
+        span_end = (max(pivot_positions) + 1) if negatives_within_pivot_span else len(tokens)
+        candidates = [i for i in range(answer_start, span_end) if i not in excluded]
         rng = _query_rng(seed, f"{uid}#{gen_idx}")
         n_take = min(max(int(round(len(t_minus_1) * negative_to_positive_ratio)), 0), len(candidates))
         sampled = (
@@ -589,7 +615,7 @@ def build_rows_from_harness_events(
         is_positive = [False] * len(tokens)
         for p in sorted(t_minus_1):
             labels[p] = LABEL_PIVOTAL
-            prob_delta[p], is_positive[p] = meta.get(p + 1, (0.0, False))
+            prob_delta[p], is_positive[p] = meta.get(p - label_offset, (0.0, False))
         for p in sampled:
             if labels[p] != LABEL_PIVOTAL:
                 labels[p] = LABEL_NON_PIVOTAL

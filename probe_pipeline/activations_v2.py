@@ -291,6 +291,10 @@ class ActivationStoreV2:
     def token_ids(self) -> np.ndarray:
         return self._f.get_tensor("token_id").numpy()
 
+    def token_positions(self) -> np.ndarray:
+        """Index of each row within its own sequence."""
+        return self._f.get_tensor("token_pos").numpy()
+
     def uncertainty(self) -> dict[str, np.ndarray]:
         """Next-token uncertainty at each labelled position.
 

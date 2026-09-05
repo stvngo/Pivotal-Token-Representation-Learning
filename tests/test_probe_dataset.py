@@ -421,3 +421,43 @@ def test_harness_carries_sign_through():
     )
     assert rows[0].prob_delta[11] == pytest.approx(-0.31)
     assert rows[0].is_positive[11] is False
+
+
+def test_negatives_stay_inside_the_pivot_span():
+    """Rollouts run to the token limit, so sampling negatives from the whole
+    sequence draws most of them from the fluent tail after the model has
+    committed -- which confounds both position and entropy with the label
+    and inflates every uncertainty baseline."""
+    from probe_pipeline.probe_dataset import build_rows_from_harness_events
+
+    seq = list(range(200, 400))          # long rollout
+    rows, _ = build_rows_from_harness_events(
+        [harness_event("q1", 0, 40, seq, 4)], negative_to_positive_ratio=5.0
+    )
+    negatives = rows[0].positions(LABEL_NON_PIVOTAL)
+    assert negatives, "expected some negatives"
+    assert max(negatives) <= 40, "negative drawn from beyond the last pivot"
+
+
+def test_negatives_anywhere_is_still_available_for_ablation():
+    from probe_pipeline.probe_dataset import build_rows_from_harness_events
+
+    seq = list(range(200, 400))
+    rows, _ = build_rows_from_harness_events(
+        [harness_event("q1", 0, 40, seq, 4)], negative_to_positive_ratio=5.0,
+        negatives_within_pivot_span=False,
+    )
+    assert max(rows[0].positions(LABEL_NON_PIVOTAL)) > 40
+
+
+def test_label_offset_zero_labels_the_pivot_itself():
+    """The post-hoc variant: read AT the pivot rather than before it."""
+    from probe_pipeline.probe_dataset import build_rows_from_harness_events
+
+    seq = list(range(200, 260))
+    rows, _ = build_rows_from_harness_events(
+        [harness_event("q1", 0, 30, seq, 4, delta=0.4)],
+        negative_to_positive_ratio=0.0, label_offset=0,
+    )
+    assert rows[0].positions(LABEL_PIVOTAL) == [30]
+    assert rows[0].prob_delta[30] == pytest.approx(0.4)

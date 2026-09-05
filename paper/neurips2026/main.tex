@@ -28,7 +28,7 @@
 \newcommand{\TODO}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\pdelta}{\Delta p}
 
-\title{Pivotal Tokens Are Mostly Uncertain Tokens}
+\title{Pivotal Tokens Are Linearly Predictable\\ Before They Are Generated}
 
 \author{%
   Steven Ngo \\
@@ -41,30 +41,33 @@
 
 \begin{abstract}
 Pivotal Token Search (PTS) labels a generated token as pivotal when it
-moves the model's probability of reaching a correct answer by more than a
+moves the model's probability of reaching a correct answer past a
 threshold, estimated by sampling many rollouts and adjudicating each with
-an oracle. We ask what that expensive label is actually measuring. Using a
-reimplementation of the search that batches rollouts across queries---and
-that emits exact token positions rather than positions recovered by
-re-tokenizing---we generate pivotal-token events for Qwen3-0.6B over 3{,}000
-GSM8K questions, and train linear probes to predict, from the residual
-stream at position $t{-}1$, whether the token at $t$ will be pivotal. The
-probe reaches \textbf{0.855 AUROC} (95\% CI $[0.799, 0.903]$, clustered by
-question), and beats a token-identity lookup table by a wide margin
-(paired difference $+0.191$, CI $[+0.116, +0.258]$). But it does
-\emph{not} separate from next-token uncertainty: entropy alone reaches
-0.814, and the paired difference is $+0.039$ with a confidence interval
-spanning zero. We argue this is close to definitional rather than
-incidental---a token can only move the success probability if the
-continuation was not already determined---and that it connects the Phi-4
-pivotal-token line of work directly to the ``forking token'' account of
-critical positions. We also report a negative result on the sharper
-question: whether the \emph{sign} of the impending shift is decodable,
-which at this scale it is not (0.614, CI $[0.482, 0.735]$). Finally we
-document two ways this measurement is easy to get wrong, both of which we
-initially got wrong ourselves: collapsing a question's sampled rollouts to
-one canonical sequence discards 74\% of the supervision, and selecting the
-best of 29 layers on the reporting split inflates the headline.
+an oracle. We ask whether that expensive, outcome-grounded property is
+already present in the model's activations \emph{one position before} the
+token is emitted --- the only position at which a prediction could still
+gate an intervention. Using a reimplementation of the search that batches
+rollouts across queries and emits exact token positions, we generate
+events for Qwen3-0.6B over 3{,}000 GSM8K questions and train linear probes
+at $t{-}1$. The probe reaches \textbf{0.807 AUROC} and beats every cheaper
+explanation we tested, including a token-identity lookup table
+($+0.110$, CI $[+0.050, +0.169]$) and next-token entropy
+($+0.112$, CI $[+0.014, +0.213]$), where differences are bootstrapped over
+questions on paired resamples. The margin over uncertainty is real but
+modest, and we show it is highly sensitive to a design choice that is easy
+to leave implicit: drawing negative examples from the whole rollout rather
+than from the span where pivots occur inflates entropy from 0.693 to 0.814
+and erases the probe's advantage entirely. Moving the probe to the pivot
+token itself raises it to 0.868 but inverts entropy to \emph{below chance}
+(0.449), showing that predictive uncertainty peaks immediately before a
+pivotal token and collapses immediately after --- the signature of a
+decision being resolved, and an argument for the $t{-}1$ framing on its own
+terms. We report a negative result on the sharper question of whether the
+\emph{sign} of the impending shift is decodable (0.614, CI $[0.482,
+0.735]$), and document two further ways this measurement inflates:
+collapsing a question's sampled rollouts to one canonical sequence
+discards 74\% of the supervision, and selecting the best of 29 layers on
+the reporting split adds 0.063 AUROC.
 \end{abstract}
 
 \section{Introduction}
@@ -99,31 +102,31 @@ suffices and no representation is implicated. \emph{Next-token
 uncertainty}: high-entropy ``forking'' tokens are the incumbent notion of
 a critical position \citep{wang2025beyond8020}.
 
-We find the probe clears the first comfortably and does not clear the
-second. On our data, next-token entropy predicts PTS's own label at 0.814
-AUROC---within noise of a trained probe on the full residual stream. We
-take this seriously rather than treating it as a nuisance: it suggests
-that what PTS measures is, to a first approximation, where the model is
-uncertain, and that the two literatures have been describing overlapping
-phenomena with different instruments.
+The probe clears both, but the margin over uncertainty is small enough
+that how the comparison is set up decides the answer. We show that an
+unexamined choice about where negative examples are drawn from can erase
+it entirely, and we report the comparison both ways.
 
 Our contributions:
 
 \begin{itemize}
   \item Evidence that pivotality is linearly decodable at $t-1$
-    (0.855 AUROC) and is \emph{not} explained by token identity
-    (Section~\ref{sec:main-result}).
-  \item Evidence that it is \emph{not separable} from next-token
-    uncertainty, using a paired bootstrap over questions rather than the
-    overlapping-interval comparison that would have hidden it
-    (Section~\ref{sec:uncertainty}).
-  \item A negative result on the signed question---whether the direction
-    of the impending shift is decodable---at this scale
-    (Section~\ref{sec:signed}).
-  \item A rebuilt labelling pipeline, and a characterization of two
-    failure modes in measuring any of this: branch collapse, which
-    discards 74\% of the available supervision, and layer selection on the
-    reporting split (Sections~\ref{sec:labels} and \ref{sec:layers}).
+    (0.807 AUROC), above token identity, next-token entropy, top-2 margin,
+    top-1 probability, and a random direction, using a paired bootstrap
+    over questions (Section~\ref{sec:main-result}).
+  \item A demonstration that this comparison is fragile: sampling
+    negatives from the whole rollout rather than the pivot-bearing span
+    raises entropy from 0.693 to 0.814 and removes the probe's advantage,
+    because rollouts run to the token limit and their tails are fluent and
+    low-entropy (Section~\ref{sec:negatives}).
+  \item A contrast between reading at $t-1$ and at the pivot itself, in
+    which entropy inverts from informative to below chance --- evidence
+    that uncertainty peaks before a pivotal token and collapses after it
+    (Section~\ref{sec:at-t}).
+  \item A negative result on whether the \emph{sign} of the shift is
+    decodable at this scale (Section~\ref{sec:signed}), and a
+    characterization of two ways the headline inflates: branch collapse
+    and layer selection (Sections~\ref{sec:labels} and \ref{sec:layers}).
 \end{itemize}
 
 \section{Related Work}
@@ -140,9 +143,9 @@ measured.
 \paragraph{Uncertainty as the incumbent account.}
 \citet{wang2025beyond8020} show that roughly 20\% of tokens carry high
 entropy, act as branch points, and account for most of the gain from
-reinforcement learning with verifiable rewards. Section~\ref{sec:uncertainty}
-is essentially a measurement of how much of PTS's criterion this account
-already covers.
+reinforcement learning with verifiable rewards. Sections~\ref{sec:main-result}
+and \ref{sec:negatives} measure how much of PTS's criterion that account
+already covers, and how sensitive the measurement is.
 
 \paragraph{Sentence-scale reasoning importance.} Thought Anchors
 \citep{bogdan2025thoughtanchors} identifies influential sentences by
@@ -254,110 +257,147 @@ positions only.
 \section{Results}
 \label{sec:results}
 
-\subsection{Pivotality is decodable, and is not token identity}
+\subsection{Pivotality is decodable at $t-1$}
 \label{sec:main-result}
 
-At the selected layer ($L{=}22$) and penalty ($C{=}10^{-3}$), the probe
-reaches \textbf{0.855 AUROC} $[0.799, 0.903]$ at accuracy 0.775 on 244
-held-out positions from 91 unseen questions. Table~\ref{tab:main} reports
-every detector, and the paired comparison that matters.
+At the selected layer ($L{=}22$) and penalty ($C{=}10^{-4}$) the probe
+reaches \textbf{0.807 AUROC} on 232 held-out positions from 91 unseen
+questions. Table~\ref{tab:main} reports every detector together with the
+paired difference from the probe, bootstrapped on the same resampled
+questions.
 
 \begin{table}[t]
   \centering
   \caption{Predicting whether the \emph{next} token is pivotal, from the
-  residual stream at $t-1$. Differences are bootstrapped on the same
-  resampled questions as the probe; $P(\Delta \le 0)$ is the fraction of
+  residual stream at $t-1$. Qwen3-0.6B on GSM8K; negatives drawn from the
+  pivot-bearing span. $P(\Delta \le 0)$ is the fraction of question-level
   resamples in which the baseline matches or beats the probe.}
   \label{tab:main}
   \begin{tabular}{lcccc}
     \toprule
     Detector & AUROC & Probe $-$ baseline & 95\% CI & $P(\Delta \le 0)$ \\
     \midrule
-    Linear probe & \textbf{0.855} & --- & --- & --- \\
+    Linear probe & \textbf{0.807} & --- & --- & --- \\
+    Mean-difference direction & 0.774 & $+0.034$ & $[+0.015, +0.055]$ & 0.001 \\
     \midrule
-    Token identity (freq.\ table) & 0.662 & $+0.191$ & $[+0.116, +0.258]$ & $<0.001$ \\
-    Token identity (one-hot LR)   & 0.696 & --- & --- & --- \\
+    Token identity (one-hot LR) & 0.716 & $+0.091$ & $[+0.032, +0.154]$ & 0.001 \\
+    Token identity (freq.\ table) & 0.696 & $+0.110$ & $[+0.050, +0.169]$ & $<0.001$ \\
     \midrule
-    Negative top-1 probability    & 0.823 & $+0.030$ & $[-0.047, +0.110]$ & 0.233 \\
-    Negative top-2 margin         & 0.821 & $+0.032$ & $[-0.048, +0.115]$ & 0.227 \\
-    Next-token entropy            & 0.814 & $+0.039$ & $[-0.037, +0.118]$ & 0.163 \\
+    Negative top-1 probability & 0.704 & $+0.101$ & $[+0.003, +0.201]$ & 0.022 \\
+    Negative top-2 margin & 0.699 & $+0.106$ & $[+0.006, +0.207]$ & 0.021 \\
+    Next-token entropy & 0.693 & $+0.112$ & $[+0.014, +0.213]$ & 0.013 \\
     \midrule
-    Mean-difference direction     & 0.820 & --- & --- & --- \\
-    Random direction              & 0.453 & --- & --- & --- \\
+    Random direction & 0.478 & $+0.328$ & $[+0.222, +0.427]$ & $<0.001$ \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The probe exceeds token identity by 0.191 AUROC with an interval far from
-zero. So pivotality is present in the residual stream one step before the
-token that realizes it, and is not merely a property of which token is
-about to be emitted.
+Every difference has an interval excluding zero, so pivotality is present
+in the residual stream one step before the token that realizes it, and is
+explained neither by which token is about to be emitted nor by how
+uncertain the model is about it. The uncertainty margins are the smallest,
+at $+0.10$ to $+0.11$ with lower bounds near zero: on 91 questions we can
+separate them, but not comfortably.
 
-\subsection{But it does not separate from next-token uncertainty}
-\label{sec:uncertainty}
+\subsection{Where the negatives come from decides the answer}
+\label{sec:negatives}
 
-Every uncertainty statistic we tested lands between 0.814 and 0.823, and
-in each case the paired difference from the probe has a confidence
-interval containing zero. Entropy alone---one scalar, available without
-any probe---recovers most of what a trained linear readout on 1{,}024
-dimensions recovers.
+That comparison depends on a choice which is easy to leave implicit. Our
+rollouts run to the token limit, and the natural thing to do is sample
+non-pivotal positions uniformly across the stored sequence. Doing so draws
+most of them from the fluent tail, \emph{after} the model has committed to
+an answer: 63\% of negatives landed beyond the last pivot, with mean
+next-token entropy 0.275 against 0.476 before it. Median position was 232
+for negatives against 146 for pivots, so raw position became informative
+too.
 
-We do not think this is an artifact, and we think it is the more
-informative half of the paper. A token can only move $P(\text{success})$ if
-the continuation was not already determined; positions where the
-probability \emph{can} move are close to positions where the model is
-uncertain. On that reading, PTS's criterion is substantially an
-uncertainty criterion wearing an outcome-shaped coat, and the Phi-4
-pivotal-token line and the forking-token line \citep{wang2025beyond8020}
-have been measuring overlapping phenomena with very different instruments
---- one costing tens of rollouts per position, the other one forward pass.
+Under that sampling, entropy rises from 0.693 to 0.814 and the probe's
+advantage over it falls to $+0.039$ with a confidence interval spanning
+zero --- a null result manufactured entirely by the negative distribution.
+We therefore restrict negatives to the span in which pivots occur, and we
+recommend that any comparison of this kind state where its negatives came
+from. Published PTS datasets avoid the problem incidentally, because the
+sequence they store stops at the deepest pivot; it appears as soon as one
+keeps the full rollout, which is otherwise the more useful artifact.
 
-The practical implication is uncomfortable for the amortization story we
-set out to tell: if the goal is to find high-leverage positions cheaply,
-entropy is already cheap and already works. The remaining case for a probe
-is the part entropy cannot do in principle, which brings us to the sign.
+\subsection{Reading at the pivot instead of before it}
+\label{sec:at-t}
+
+Moving the label from $t-1$ to the pivot itself gives a post-hoc
+classifier: informative, but unable to gate anything, because by then the
+token exists. Table~\ref{tab:at-t} compares the two.
+
+\begin{table}[t]
+  \centering
+  \caption{Same data and same negatives, with the probe read at $t-1$
+  versus at the pivotal token $t$.}
+  \label{tab:at-t}
+  \begin{tabular}{lcc}
+    \toprule
+    Detector & at $t-1$ & at $t$ \\
+    \midrule
+    Linear probe & 0.807 & \textbf{0.868} \\
+    Mean-difference direction & 0.774 & 0.810 \\
+    Token identity (freq.\ table) & 0.696 & 0.786 \\
+    Next-token entropy & \textbf{0.693} & \textbf{0.449} \\
+    Negative top-2 margin & 0.699 & 0.445 \\
+    Random direction & 0.478 & 0.514 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The probe gains six points and token identity nine, which is unsurprising:
+at $t$ the token occupying the labelled position \emph{is} the pivot. The
+informative change is entropy, which inverts from 0.693 to 0.449 --- below
+chance. Uncertainty is elevated immediately before a pivotal token and
+suppressed immediately after it, which is what a decision point being
+resolved should look like, and it means the two positions carry opposite
+uncertainty signatures rather than differing in degree. It also supplies an
+argument for the $t-1$ framing that does not depend on the intervention
+story: $t-1$ is where the uncertainty signal actually lives.
 
 \subsection{The sign is not decodable at this scale}
 \label{sec:signed}
 
 Pivotality as defined in Eq.~\ref{eq:pts} is symmetric: a token that
-rescues an answer and one that ruins it get the same label. The sharper
-question is whether the \emph{sign} is decodable at $t-1$---whether the
-model represents, one step early, that it is about to make a mistake.
-Entropy is sign-blind by construction and cannot answer it, so a positive
-result here would be immune to Section~\ref{sec:uncertainty}.
+rescues an answer and one that ruins it receive the same label. The sharper
+question is whether the \emph{sign} is decodable at $t-1$. Entropy is
+sign-blind by construction and cannot answer it, so a positive result here
+would be immune to Section~\ref{sec:negatives} entirely.
 
 Restricting to pivotal positions and relabelling by
 $\mathrm{sign}(\pdelta)$ gives 566 training and 122 test rows (56.5\%
-helpful). A probe reaches 0.614 AUROC, with a 95\% interval of
-$[0.482, 0.735]$ that contains chance. The signed mean-difference
-direction reaches 0.567 and token identity 0.555. We report this as a
-negative result. An earlier version of this analysis, on a smaller and
-noisier label set, gave 0.717 and looked promising; it did not survive a
-cleaner dataset with four times as many held-out questions.
+helpful). A probe reaches 0.614 AUROC with a 95\% interval of $[0.482,
+0.735]$ that contains chance; the signed mean-difference direction reaches
+0.567 and token identity 0.555. We report this as a negative result. An
+earlier version on a smaller, noisier label set gave 0.717 and looked
+promising; it did not survive four times as many held-out questions.
 
 \subsection{No layer is special, and selection inflates the headline}
 \label{sec:layers}
 
-Simulating a null in which all 29 layers are equally informative, each
-measured on 244 rows, gives an expected maximum close to the observed one,
-so the identity of the ``best'' layer carries little information; the
-signal is distributed across the mid-to-late stack.
+Per-layer accuracy spans 0.651--0.741 with mean 0.702. Simulating a null in
+which all 29 layers are equally informative, each measured on 232 rows,
+gives an expected maximum of 0.762 against an observed 0.741, with
+$P(\text{observed or higher}) = 0.96$. There is no evidence of layer
+specialization; the signal is spread across the mid-to-late stack, and
+naming a single ``pivotal layer'' would be an artifact of maximizing over
+correlated noise.
 
-The cost of getting this wrong is measurable. Choosing the layer on the
-reporting split gives 0.866; choosing it on training data and reporting on
-test gives 0.855. Under our earlier, leakier protocol the same gap was
-0.063 AUROC---large enough to manufacture a result.
+The cost of getting the protocol wrong is measurable. Choosing the layer on
+training data and reporting on test gives 0.807; taking the best layer on
+the reporting split gives 0.814, a gap of 0.007. Under a leakier protocol
+we measured the same gap at 0.063 --- large enough to manufacture a result.
 
 \subsection{Regularization}
 \label{sec:reg}
 
-AUROC moves from 0.800 at $C{=}1$ to 0.855 at $C{=}10^{-3}$, and the
-probe direction rotates toward the mean-difference direction as the penalty
-tightens (cosine 0.203 to 0.800). A weakly regularized probe still
-classifies but does so along a nearly orthogonal direction, which matters
-for anyone intending to use the probe's weights as an intervention
-direction rather than only as a classifier.
+AUROC moves from 0.752 at $C{=}1$ to 0.816 at $C{=}10^{-3}$, and the probe
+direction rotates toward the mean-difference direction as the penalty
+tightens (cosine 0.173 to 0.765). A weakly regularized probe still
+classifies, but along a substantially different direction --- which matters
+for anyone intending to use the weights as an intervention direction rather
+than only as a classifier.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -375,23 +415,24 @@ matching such a hallucination rather than to a genuine shift. Linear
 probes test linear decodability only. Everything here is correlational: we
 have not shown that the direction the probe identifies is causally used.
 
-Most importantly, Section~\ref{sec:uncertainty} is a null result on a
-comparison, not a proof of equivalence: 91 questions cannot rule out a
-real 4-point advantage. \TODO{Scale the question count and re-test; also
-re-run this comparison on the released label set with the fixed pipeline,
-to separate ``PTS is an uncertainty criterion'' from ``our generation
-regime made it one''.}
+Most importantly, the margins over uncertainty in Table~\ref{tab:main} are
+$+0.10$ to $+0.11$ with lower bounds within 0.01 of zero, on 91 questions.
+They are separations, not comfortable ones, and Section~\ref{sec:negatives}
+shows how little it takes to erase them. \TODO{Scale the question count and
+re-test; extend to Qwen3-1.7B and 4B.}
 
 \section{Conclusion}
 
 Pivotality is linearly present in a model's residual stream one position
-before the token that realizes it, at 0.855 AUROC, and is clearly
-separable from token identity. It is not separable from next-token
-uncertainty, which alone reaches 0.814---suggesting that an expensive,
-outcome-grounded, rollout-based criterion is largely recovering something a
-single forward pass already exposes. Whether the \emph{direction} of the
-impending shift carries information beyond that remains open; at this
-sample size it does not.
+before the token that realizes it, at 0.807 AUROC, above token identity and
+above every next-token uncertainty statistic we tested. The margin over
+uncertainty is modest and, we show, contingent on where negative examples
+are drawn from: a plausible-looking choice removes it entirely. Reading at
+the pivot instead raises the probe but inverts entropy to below chance,
+locating the uncertainty signal specifically at $t-1$ --- the one position
+that is both informative and available while a decision can still be
+influenced. Whether the \emph{direction} of the impending shift is also
+decodable remains open; at this sample size it is not.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
