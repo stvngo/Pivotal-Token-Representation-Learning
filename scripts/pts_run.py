@@ -83,7 +83,40 @@ def parse_args() -> argparse.Namespace:
                         "this is the maximum amount of search that a "
                         "reclaimed VM can cost you.")
     p.add_argument("--hf-private", action="store_true", default=True)
+    p.add_argument("--no-hf-resume", action="store_true",
+                   help="do not restore prior state from --hf-repo first")
     return p.parse_args()
+
+
+def pull_hf_run(run_dir: str, repo_id: str) -> int:
+    """Restore a mirrored run before starting, so a fresh VM resumes.
+
+    The other half of mirroring, and useless without it: pushing state off
+    a VM only helps if the next VM reads it back. Resume is keyed on
+    content-addressed node ids, so every estimate recovered here is a
+    rollout that does not have to be paid for again.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+
+        from probe_pipeline.artifacts_io import resolve_hf_token
+
+        name = Path(run_dir).name
+        dest = Path(run_dir).parent
+        dest.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=str(dest),
+            allow_patterns=[f"{name}/**"],
+            token=resolve_hf_token(),
+        )
+        n = sum(1 for _ in Path(run_dir).rglob("probs.jsonl"))
+        print(f"[hf] restored {run_dir} from {repo_id} ({n} session file(s))", flush=True)
+        return n
+    except Exception as exc:
+        print(f"[hf] nothing to restore: {type(exc).__name__}: {exc}", flush=True)
+        return 0
 
 
 def start_hf_mirror(run_dir: str, repo_id: str, every: int):
@@ -221,6 +254,8 @@ def main() -> None:
     run_cfg = vars(args) | {"search": cfg.__dict__}
     run_cfg.pop("hf_repo", None)          # not part of the run's identity
     started = time.time()
+    if args.hf_repo and not args.no_hf_resume:
+        pull_hf_run(args.out, args.hf_repo)
     mirror = start_hf_mirror(args.out, args.hf_repo, args.hf_every) if args.hf_repo else None
 
     with RunStore(args.out, session=args.session, config=run_cfg) as store:
