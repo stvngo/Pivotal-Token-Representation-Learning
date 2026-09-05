@@ -152,6 +152,37 @@ scripts/colab_job.py -s ptrl-g4 --tail -n 50
 It syncs the repo on the VM from the working branch before starting,
 unless `--no-sync`.
 
+## Durability: mirror the run, do not trust the VM
+
+A run was lost this way, so it is worth being explicit.
+
+The CLI treats a 401/404 on `exec` as "the backend pruned the VM" and
+deletes its local record. On a long run that inference can be wrong — the
+VM is alive and still working — and the session then shows as an orphan
+that no command can address by name. `scripts/colab_reattach.py` recovers
+it, because the server's assignment listing returns the VM token and URL.
+
+But pruning the local record also orphans the keep-alive daemon, and
+without keep-alive the VM is eventually reclaimed for real. That is what
+happened: ~90 minutes of search vanished with `/content`.
+
+So **always pass `--hf-repo`** to `scripts/pts_run.py`. It mirrors the run
+directory to a HuggingFace dataset repo every `--hf-every` minutes
+(default 2). The store is append-only JSONL and resume is keyed on
+content-addressed node ids, so a pulled-back mirror recomputes nothing and
+a reclaimed VM costs at most a couple of minutes.
+
+```bash
+scripts/colab_job.py -s ptrl-g4 --script scripts/pts_run.py -- \
+    --model Qwen/Qwen3-0.6B --backend vllm --max-examples 3000 \
+    --hf-repo <user>/ptrl-runs --hf-every 2 \
+    --out /content/runs/qwen3-0.6b-full
+```
+
+`colab_job.py` writes `HF_TOKEN` into the remote repo's `.env` rather than
+passing it on the command line or through the environment, since both are
+visible in `ps` on the VM.
+
 ## Agent notes
 
 The CLI ships its own skill file: `colab skill`. Worth reading; the points
