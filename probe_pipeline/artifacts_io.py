@@ -202,6 +202,17 @@ def resolve_hf_token(*, required: bool = False) -> str | None:
     if token:
         return token.strip()
 
+    # A gitignored .env at the repo root, for local runs.
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+                return value.strip().strip("\"'")
+
     try:  # Colab secret: per-user, never serialized into the notebook JSON
         from google.colab import userdata  # type: ignore
 

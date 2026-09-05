@@ -56,6 +56,21 @@ class VLLMRolloutBackend:
         if llm is not None:
             self.llm = llm
         else:
+            # Import torch first, deliberately. On CUDA-13 builds vLLM's
+            # compiled extension needs libcudart.so.13, which ships inside
+            # torch's own nvidia/cu13/lib rather than the system CUDA
+            # toolkit (12.8 on Colab). Importing torch dlopens it; importing
+            # vllm first fails with ImportError: libcudart.so.13.
+            import os
+
+            # FlashInfer's check_cuda_arch misreads sm_120 (Blackwell) and
+            # raises "FlashInfer requires GPUs with sm75 or higher", which
+            # sm_120 plainly satisfies. Route attention and sampling away
+            # from it unless the caller has already chosen a backend.
+            os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+            os.environ.setdefault("VLLM_ATTENTION_BACKEND", "TRITON_ATTN")
+
+            import torch  # noqa: F401
             from vllm import LLM
 
             self.llm = LLM(
