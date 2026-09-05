@@ -1,0 +1,188 @@
+# CLAUDE.md
+
+Guidance for working in this repository.
+
+## What this project is
+
+Mechanistic interpretability of **pivotal tokens**. PTS (Phi-4, Abdin et al.
+2024; open implementation by codelion) labels a generated token pivotal when
+appending it moves the model's probability of solving the task past a
+threshold, `|Δp| > τ`, estimated by sampling rollouts and adjudicating each
+with an oracle.
+
+The research question: **is pivotality linearly decodable from the residual
+stream at position `t-1`, before the token exists?** That position is the
+only one where a prediction could still gate an intervention; a probe read
+at the pivot itself is a post-hoc classifier.
+
+Target: a workshop paper on the NeurIPS 2026 template (`paper/neurips2026/`,
+builds with `make`).
+
+## Current state
+
+Working branch: `rebuild/pipeline-and-scale`. 200 tests, no skips, none
+needing a GPU or network.
+
+Headline (Qwen3-0.6B, GSM8K, our own PTS data, 91 held-out questions):
+probe at `t-1` reaches **0.807 AUROC**, beating token identity (+0.110),
+entropy (+0.112), top-2 margin (+0.106), top-1 prob (+0.101) and a random
+direction (+0.328). All separations, but the uncertainty margins have lower
+bounds within 0.01 of zero. Signed probe (helpful vs harmful) is a
+**negative result**: 0.614, CI contains chance.
+
+Published: `stvngo/Qwen3-0.6B-pts-tokens`,
+`stvngo/Qwen3-0.6B-pivotal-activations` (private).
+
+## Conventions that must not drift
+
+| Convention | Why |
+| --- | --- |
+| Label at **`t-1`** (`position - 1`) | The prediction problem. `label_offset=0` reads at the pivot; diagnostic only, cannot gate. |
+| `hidden_states[L]` is the output of `model.layers[L-1]`; index 0 is the embedding | Getting this wrong cost a whole round of steering runs (`docs/issues.md` #2). The v2 manifest records it so consumers can assert. |
+| Split by **question**, never by row | Positions in one trace are not independent. |
+| Negatives from the **pivot-bearing span** | See "negative sampling" below. Not optional. |
+| Rows carry **token ids**, never decoded text | `encode(decode(ids)) != ids`; the round trip shifted labels in v1. |
+| `prob_delta` carried through | The signed probe needs it; v1 dropped it. |
+
+## Statistical discipline
+
+These are not stylistic preferences; relaxing any of them produced a wrong
+conclusion in this project.
+
+- **Compare with a paired bootstrap, not overlapping CIs.** Resample the
+  same questions for both detectors and bootstrap the *difference*
+  (`scripts/compare_baselines.py`). Comparing marginal intervals is badly
+  conservative and once supported the opposite conclusion.
+- **Select hyperparameters on an inner split of train.** Layer and `C` are
+  chosen there; test is touched once. Leaking selection inflated AUROC by
+  0.063.
+- **Bootstrap over questions, not rows.**
+- **Check "best layer" against a null.** `null_max_distribution` simulates
+  all layers being equally good. On this data the expected max *exceeds*
+  the observed one, so there is no layer specialization — do not claim one.
+- **Regularization is not a detail.** AUROC moves 0.752 → 0.816 across the
+  `C` grid, and the probe direction rotates toward the mean-difference
+  direction as `C` tightens. Report the path.
+
+## The baselines, and what each rules out
+
+- **random direction** — the floor. Any arbitrary direction.
+- **token identity** (smoothed log-odds, and one-hot LR) — is "pivotality"
+  just a vocabulary fact? On the old cache layer 0 (raw embeddings) hit
+  65.4%, so this is the dangerous one. Must be fit on train and scored
+  held-out; in-sample it memorizes.
+- **entropy / neg top-2 margin / neg top-1 prob** — is PTS just relabelling
+  high-entropy "forking" tokens (Wang et al. 2025)? One forward pass, no
+  training.
+- **CAA / mean-difference** — *not* a cheaper explanation but a simpler
+  *estimator* on the same data. Answers "do you need a trained probe?"
+
+## Traps found the hard way
+
+**Negative sampling decides the entropy comparison.** Our rollouts run to
+the token limit and we store the whole rollout; codelion's stored sequence
+stops at the deepest pivot. Sampling negatives uniformly drew 63% of ours
+from the fluent tail *after* the model committed (entropy 0.275 vs 0.476),
+and made position informative (median 232 vs 146 for pivots). That inflated
+entropy from 0.693 to 0.814 and erased the probe's advantage — a null
+result manufactured by the negative distribution. Default is now
+`negatives_within_pivot_span=True`.
+
+**Branch collapse throws away most of the data.** PTS samples several
+rollouts per question and they diverge. Collapsing to the "longest"
+sequence and matching others by string prefix discards every pivot on a
+diverging branch — 74% of them on codelion's data (318 of 1,245 kept).
+Treat each maximal branch as its own row, and label each distinct context
+once, since branches share prefixes and a shared prefix yields a
+bit-identical activation.
+
+**Activation caches aliased their whole sequence.** `hidden[i].detach()
+.cpu().float()` on a CPU float32 tensor returns a *view*, and `torch.save`
+serializes storages — 3.35 GB for 594 rows. `activations_v2` stores
+labelled positions only in bf16 and asserts non-aliasing.
+
+**Probe weights were exported in standardized space** and applied to raw
+activations, so every steering direction was off by `1/σ`. `to_raw_space`
+folds the scaler back in.
+
+**Grouping by `dataset_item_id` is wrong in both directions.** codelion's
+data has 104 ids over 107 question texts, and one question under two ids —
+which straddled the train/test split. Group by normalized question text.
+
+**Uncertainty inverts at the pivot.** Entropy is 0.693 at `t-1` and 0.449
+(below chance) at `t`. It peaks before a pivotal token and collapses after.
+
+## Layout
+
+```
+pts_harness/          our PTS search: state machine + wave scheduler + resume
+  search.py           bisection as a resumable state machine
+  scheduler.py        batches ready work across queries (8.9x throughput)
+  checkpoint.py       append-only JSONL; query = durable unit, node = memoized
+  probability.py      sufficient statistics (n, successes), Wilson CIs
+  backends/           fake (tests) | hf (portable) | vllm (production)
+probe_pipeline/
+  probe_dataset.py    PTS events -> labelled rows
+  activations_v2.py   labelled-position safetensors cache
+  extract_v2.py       forward passes -> cache (also records entropy/margin)
+  probes.py           fitting, raw-space export, nested selection, cluster CIs
+  baselines.py        the rival explanations
+  artifacts_io.py     content-addressed cache, local + HF
+scripts/              colab, colab_job, colab_reattach, pts_run,
+                      build_and_extract, evaluate_probes_v2,
+                      compare_baselines, push_to_hf
+docs/                 pts_semantics.md (upstream, pinned 8334808),
+                      colab_cli.md, issues.md (STALE — see below)
+```
+
+`probe_pipeline/{preprocess,activations,dataset}.py` are the **v1** path,
+kept only for reproducing old figures. Do not build on them.
+
+`docs/issues.md` predates commit `552b2da` and is stale: the off-by-one, the
+norm-scaled modes, NIE and reactive steering all landed after it was
+written.
+
+## GPU workflow (Colab CLI)
+
+`scripts/colab` wraps the CLI (fixes certs, forces `--auth=adc`, points at
+an isolated `uv tool` install with `jupyter-kernel-client==0.15.0` pinned).
+
+```bash
+scripts/colab new -s ptrl-g4 --gpu G4          # RTX PRO 6000 Blackwell, 96 GB
+scripts/colab_job.py -s ptrl-g4 --script scripts/pts_run.py -- ...
+scripts/colab_job.py -s ptrl-g4 --tail -n 40
+scripts/colab stop -s ptrl-g4                   # ALWAYS; idle VMs bill
+```
+
+- `--gpu G4` is the one to use. An **unrecognized `--gpu` silently falls
+  back to A100**, so a typo gets the wrong billed hardware.
+- `colab exec` times out after a few minutes; long jobs go through
+  `colab_job.py`, which runs them under `nohup` and polls.
+- **The session record gets pruned roughly hourly** (ADC access tokens
+  expire in 59m). The VM usually survives; `scripts/colab_reattach.py`
+  re-adopts it from the server's assignment listing. But pruning also
+  orphans the keep-alive daemon, and the VM is then eventually reclaimed
+  for real — this cost 90 minutes of search once.
+- **Therefore always pass `--hf-repo` to `pts_run.py`.** It mirrors the run
+  every 2 minutes and restores it on start, so a lost VM costs minutes.
+  Verified: recovered 1,948 questions and 9,148 cached estimates.
+- vLLM on Blackwell needs three fixes (import torch before vllm;
+  reinstall torchvision from the cu130 index; `TRITON_ATTN` because
+  FlashInfer misreads sm_120). Handled in the backend; see
+  `docs/colab_cli.md`.
+
+Measured: 38,074 tok/s for a 64-node wave; `f` (queries inside the
+[0.2, 0.8] band) ≈ 0.40–0.55; ≈14 bisection midpoints per searched query;
+extraction is seconds on GPU, ~7 min on the M3.
+
+## House style
+
+- Report negative and inconclusive results as such. Two conclusions in this
+  project were reversed by better methodology; both reversals are in the
+  git history and in the paper.
+- Every number in the paper must trace to an artifact produced by the
+  current pipeline. Nothing from the pre-2026-09 runs is carried forward.
+- Local machine is MPS-only (M3, 16 GB): fine for probe training, analysis
+  and the paper; not for generation.
+- `.env` holds `HF_TOKEN` and is gitignored; `tests/test_no_secrets.py`
+  greps source *and notebook outputs* for token literals.
