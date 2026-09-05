@@ -48,6 +48,30 @@ def colab_exec(session: str, code: str, *, quiet: bool = True) -> str:
     return "\n".join(lines)
 
 
+def push_token(session: str) -> bool:
+    """Write HF_TOKEN into the remote repo's .env.
+
+    Not passed on the command line or through the Popen environment, since
+    both are visible in `ps` on the VM. A 0600 file in the repo root is
+    where resolve_hf_token already looks.
+    """
+    sys.path.insert(0, str(ROOT))
+    from probe_pipeline.artifacts_io import resolve_hf_token
+
+    token = resolve_hf_token()
+    if not token:
+        return False
+    code = f"""
+import os, pathlib
+p = pathlib.Path({REMOTE_ROOT!r}) / ".env"
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text("HF_TOKEN=" + {token!r} + chr(10))
+os.chmod(p, 0o600)
+print("token written")
+"""
+    return "token written" in colab_exec(session, code)
+
+
 def start(session: str, script: str, args: list[str], *, sync: bool) -> None:
     local = Path(script)
     if not local.exists():
@@ -56,6 +80,8 @@ def start(session: str, script: str, args: list[str], *, sync: bool) -> None:
     if sync:
         print(f"[job] syncing repo on {session}")
         print(colab_exec(session, SYNC_CODE))
+    # After syncing, since a fresh clone would not carry it.
+    print(f"[job] hf token: {'ok' if push_token(session) else 'not available'}")
 
     remote = f"{REMOTE_ROOT}/{local.name}" if str(local).startswith("scripts/") else f"/content/{local.name}"
     payload = local.read_text()

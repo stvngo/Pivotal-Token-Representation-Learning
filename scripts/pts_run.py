@@ -74,7 +74,48 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gpu-memory-utilization", type=float, default=0.90)
     p.add_argument("--calibrate", action="store_true",
                    help="report measured f, B and throughput, then exit")
+    p.add_argument("--hf-repo", default=None,
+                   help="mirror the run directory to this HF dataset repo. "
+                        "Strongly recommended: a Colab VM can be reclaimed "
+                        "mid-run, and without this the checkpoint dies with it.")
+    p.add_argument("--hf-every", type=int, default=2,
+                   help="minutes between mirror commits. Deliberately short: "
+                        "this is the maximum amount of search that a "
+                        "reclaimed VM can cost you.")
+    p.add_argument("--hf-private", action="store_true", default=True)
     return p.parse_args()
+
+
+def start_hf_mirror(run_dir: str, repo_id: str, every: int):
+    """Mirror the run directory to HuggingFace while the search runs.
+
+    The VM is not durable. Colab reclaims runtimes, and the CLI can lose
+    track of one mid-run; either way /content goes with it. Because the
+    store is append-only JSONL and resume is keyed on content, a mirrored
+    run costs at most `every` minutes when that happens instead of the
+    whole job.
+    """
+    try:
+        from huggingface_hub import CommitScheduler
+
+        from probe_pipeline.artifacts_io import resolve_hf_token
+
+        token = resolve_hf_token(required=True)
+        sched = CommitScheduler(
+            repo_id=repo_id,
+            repo_type="dataset",
+            folder_path=run_dir,
+            path_in_repo=Path(run_dir).name,
+            every=every,
+            private=True,
+            token=token,
+            allow_patterns=["*.jsonl", "*.json"],
+        )
+        print(f"[hf] mirroring {run_dir} -> {repo_id} every {every}m", flush=True)
+        return sched
+    except Exception as exc:  # never let mirroring failure kill the run
+        print(f"[hf] mirror disabled: {type(exc).__name__}: {exc}", flush=True)
+        return None
 
 
 def shard_of(uid: str, num_shards: int) -> int:
@@ -178,7 +219,10 @@ def main() -> None:
     oracle = GSM8KOracle(answers)
 
     run_cfg = vars(args) | {"search": cfg.__dict__}
+    run_cfg.pop("hf_repo", None)          # not part of the run's identity
     started = time.time()
+    mirror = start_hf_mirror(args.out, args.hf_repo, args.hf_every) if args.hf_repo else None
+
     with RunStore(args.out, session=args.session, config=run_cfg) as store:
         sched = WaveScheduler(
             backend,
@@ -197,6 +241,13 @@ def main() -> None:
         print("[3/3] searching")
         summary = sched.run(specs)
         events_path = store.export_events(Path(args.out) / "events.jsonl")
+
+    if mirror is not None:
+        try:
+            mirror.trigger().result()      # final push before we exit
+            print(f"[hf] final push to {args.hf_repo} done", flush=True)
+        except Exception as exc:
+            print(f"[hf] final push failed: {exc}", flush=True)
 
     elapsed = time.time() - started
     out = summary.as_dict()
