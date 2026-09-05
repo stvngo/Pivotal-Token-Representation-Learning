@@ -91,18 +91,36 @@ def main() -> None:
     # kernel_id is left unset on purpose: the CLI reconnects to the running
     # kernel on the next exec. Nothing about the VM's filesystem is touched,
     # so a job still running under nohup keeps running.
-    state.store.add(
-        SessionState(
-            name=name,
-            token=target.runtime_proxy_info.token,
-            url=target.runtime_proxy_info.url,
-            endpoint=target.endpoint,
-            variant=target.variant.name,
-            accelerator=target.accelerator.value,
-        )
+    s = SessionState(
+        name=name,
+        token=target.runtime_proxy_info.token,
+        url=target.runtime_proxy_info.url,
+        endpoint=target.endpoint,
+        variant=target.variant.name,
+        accelerator=target.accelerator.value,
     )
+    state.store.add(s)
+
+    # Restoring the record is not enough on its own. Pruning also orphaned
+    # the keep-alive daemon, and without it Colab reclaims the VM a while
+    # later -- which is how three VMs were lost before this was understood.
+    # Respawn it exactly as `colab new` does.
+    try:
+        from colab_cli.commands.session import spawn_keep_alive
+
+        s.keep_alive_pid = spawn_keep_alive(
+            target.endpoint,
+            name,
+            auth_provider=state.auth_provider,
+            config_path=state.config_path,
+        )
+        state.store.add(s)
+        keep = f"keep-alive respawned (pid {s.keep_alive_pid})"
+    except Exception as exc:
+        keep = f"KEEP-ALIVE NOT RESTARTED ({type(exc).__name__}: {exc}) -- the VM will be reclaimed"
+
     print(f"adopted {target.endpoint} ({target.accelerator.value}) as '{name}'")
-    print(f"check it with:  scripts/colab status -s {name}")
+    print(f"  {keep}")
 
 
 if __name__ == "__main__":
