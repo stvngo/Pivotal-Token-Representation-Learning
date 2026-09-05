@@ -3,9 +3,11 @@
 % Track: switch \usepackage[preprint] to [dblblindworkshop] and set
 % \workshoptitle{} for submission. Build with `make`.
 %
-% Every number in Section 5 traces to artifacts/probes_v2/qwen3-0.6b_report.json,
-% produced by scripts/evaluate_probes_v2.py on the rebuilt pipeline. Nothing
-% from the pre-2026-09 runs is carried in.
+% Every number in Section 5 traces to
+% artifacts/probes_v2_full/qwen3-0.6b_report.json, produced by
+% scripts/evaluate_probes_v2.py on data this project generated
+% (stvngo/Qwen3-0.6B-pts-tokens). Nothing from the pre-2026-09 runs is
+% carried in.
 
 \documentclass{article}
 \usepackage[preprint]{neurips_2026}
@@ -26,11 +28,11 @@
 \newcommand{\TODO}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\pdelta}{\Delta p}
 
-\title{Pivotal Tokens Are Linearly Predictable\\ Before They Are Generated}
+\title{Pivotal Tokens Are Mostly Uncertain Tokens}
 
 \author{%
   Steven Ngo \\
-  \texttt{svinhngo@gmail.com} \\
+  \texttt{svngo@ucsd.edu} \\
 }
 
 \begin{document}
@@ -38,374 +40,358 @@
 \maketitle
 
 \begin{abstract}
-Pivotal Token Search (PTS) identifies the individual tokens at which a
-language model's probability of reaching a correct answer shifts sharply,
-but it does so offline and at a cost of tens of sampled rollouts per
-candidate position. We ask whether pivotality is recoverable from the
-model's own residual stream \emph{one position before} the token is
-emitted, which would turn an expensive offline analysis into a single dot
-product available during decoding. On Qwen3-0.6B over GSM8K, a linear
-probe read at $t{-}1$ attains \textbf{0.812 AUROC} (95\% CI
-$[0.739, 0.864]$, clustered by question) at predicting whether the next
-token is pivotal. The comparison that matters is against cheaper
-explanations: the probe exceeds a token-identity lookup table by 11 points
-and next-token entropy by 18, with a confidence interval whose lower bound
-lies above both. Pivotality is therefore not a restatement of the
-high-entropy ``forking token'' account of critical positions. We further
-find that the result is highly sensitive to regularization---AUROC moves
-monotonically from 0.698 to 0.812 as the inverse penalty $C$ falls from
-$1$ to $10^{-4}$, with the probe direction rotating toward the
-contrastive mean-difference direction---and that no individual layer is
-special: under a null in which all layers are equally informative, the
-expected maximum over 29 layers \emph{exceeds} the observed maximum.
-We release a rebuilt labelling pipeline that recovers $3.8\times$ more
-supervised positions from the same source data than the construction it
-replaces.
+Pivotal Token Search (PTS) labels a generated token as pivotal when it
+moves the model's probability of reaching a correct answer by more than a
+threshold, estimated by sampling many rollouts and adjudicating each with
+an oracle. We ask what that expensive label is actually measuring. Using a
+reimplementation of the search that batches rollouts across queries---and
+that emits exact token positions rather than positions recovered by
+re-tokenizing---we generate pivotal-token events for Qwen3-0.6B over 3{,}000
+GSM8K questions, and train linear probes to predict, from the residual
+stream at position $t{-}1$, whether the token at $t$ will be pivotal. The
+probe reaches \textbf{0.855 AUROC} (95\% CI $[0.799, 0.903]$, clustered by
+question), and beats a token-identity lookup table by a wide margin
+(paired difference $+0.191$, CI $[+0.116, +0.258]$). But it does
+\emph{not} separate from next-token uncertainty: entropy alone reaches
+0.814, and the paired difference is $+0.039$ with a confidence interval
+spanning zero. We argue this is close to definitional rather than
+incidental---a token can only move the success probability if the
+continuation was not already determined---and that it connects the Phi-4
+pivotal-token line of work directly to the ``forking token'' account of
+critical positions. We also report a negative result on the sharper
+question: whether the \emph{sign} of the impending shift is decodable,
+which at this scale it is not (0.614, CI $[0.482, 0.735]$). Finally we
+document two ways this measurement is easy to get wrong, both of which we
+initially got wrong ourselves: collapsing a question's sampled rollouts to
+one canonical sequence discards 74\% of the supervision, and selecting the
+best of 29 layers on the reporting split inflates the headline.
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
 
 A language model solving a multi-step problem does not distribute its risk
-evenly across the tokens it emits. Most continuations are near-determined
-by what came before; a few are decision points at which the eventual
-outcome genuinely changes. The Phi-4 technical report
+evenly across the tokens it emits. The Phi-4 technical report
 \citep{abdin2024phi4technicalreport} formalized this as \emph{Pivotal Token
 Search} (PTS): a token $t$ is pivotal when appending it to a prefix moves
-the estimated probability of eventually solving the task by more than a
-threshold,
+the estimated probability of eventually solving the task past a threshold,
 \begin{equation}
   \label{eq:pts}
   |\pdelta| = \bigl| P(\text{success} \mid \text{prefix} + t)
               - P(\text{success} \mid \text{prefix}) \bigr| > \tau .
 \end{equation}
 Estimating either term requires sampling many completions and adjudicating
-each with an oracle, so PTS is an offline instrument. It labels data; it
-cannot watch a model as it decodes.
+each with an oracle, so PTS is an offline instrument that costs tens of
+rollouts per candidate position.
 
-This paper asks whether that instrument can be amortized. Concretely: is
-pivotality \emph{linearly decodable from the residual stream at position
-$t-1$}, before the token in question is produced? A probe read one step
-early is a fundamentally different object from one read at the pivotal
-token itself. The latter is a post-hoc classifier; the former is available
-while there is still a decision to influence, and costs one dot product
-against roughly $50 \times 320$ generated tokens for the oracle it
-approximates.
+Our starting question was whether that instrument can be amortized: is
+pivotality linearly decodable from the residual stream at $t-1$, before the
+token is produced? A probe read one step early is a different object from
+one read at the pivotal token itself---the latter is a post-hoc
+classifier, the former is available while there is still a decision to
+influence.
 
+It is. But the more informative result is \emph{what else} predicts it.
 The question is only interesting if the answer is not already known for a
-cheaper reason. Two such reasons exist and we treat both as primary
-baselines rather than as controls to be mentioned in passing.
-\emph{Token identity}: some tokens may simply be pivotal more often than
-others, in which case a lookup table suffices and no representation is
-implicated. \emph{Next-token uncertainty}: high-entropy ``forking''
-tokens are the incumbent notion of a critical position
-\citep{wang2025beyond8020}, and a probe that merely rediscovers entropy
-adds nothing.
+cheaper reason, and two cheaper reasons exist. \emph{Token identity}: some
+tokens may simply be pivotal more often, in which case a lookup table
+suffices and no representation is implicated. \emph{Next-token
+uncertainty}: high-entropy ``forking'' tokens are the incumbent notion of
+a critical position \citep{wang2025beyond8020}.
+
+We find the probe clears the first comfortably and does not clear the
+second. On our data, next-token entropy predicts PTS's own label at 0.814
+AUROC---within noise of a trained probe on the full residual stream. We
+take this seriously rather than treating it as a nuisance: it suggests
+that what PTS measures is, to a first approximation, where the model is
+uncertain, and that the two literatures have been describing overlapping
+phenomena with different instruments.
 
 Our contributions:
 
 \begin{itemize}
-  \item A rebuilt labelling pipeline for PTS events. PTS samples several
-    rollouts per question and they diverge; collapsing a question to a
-    single canonical sequence, as prior constructions do, discards every
-    pivot on a diverging branch. Treating each maximal branch as its own
-    sequence recovers $3.8\times$ more supervised positions from identical
-    source data (Section~\ref{sec:labels}).
-  \item Evidence that pivotality is linearly decodable at $t-1$ at
-    0.812 AUROC, and that this exceeds both token identity and every
-    next-token uncertainty statistic we tested
+  \item Evidence that pivotality is linearly decodable at $t-1$
+    (0.855 AUROC) and is \emph{not} explained by token identity
     (Section~\ref{sec:main-result}).
-  \item A characterization of two ways this measurement goes wrong:
-    regularization strength moves AUROC by 11 points monotonically, and
-    ``best layer'' selection is indistinguishable from noise
-    (Sections~\ref{sec:reg} and \ref{sec:layers}).
-  \item A first look at the \emph{signed} question---whether the direction
-    of the impending shift is separately decodable---which shows signal
-    above entropy but is not yet separable from token identity
+  \item Evidence that it is \emph{not separable} from next-token
+    uncertainty, using a paired bootstrap over questions rather than the
+    overlapping-interval comparison that would have hidden it
+    (Section~\ref{sec:uncertainty}).
+  \item A negative result on the signed question---whether the direction
+    of the impending shift is decodable---at this scale
     (Section~\ref{sec:signed}).
+  \item A rebuilt labelling pipeline, and a characterization of two
+    failure modes in measuring any of this: branch collapse, which
+    discards 74\% of the available supervision, and layer selection on the
+    reporting split (Sections~\ref{sec:labels} and \ref{sec:layers}).
 \end{itemize}
 
 \section{Related Work}
 \label{sec:related}
 
 \paragraph{Pivotal tokens.} \citet{abdin2024phi4technicalreport} introduce
-PTS to build preference pairs for Phi-4 post-training;
-\citet{pts} released an open implementation and the event datasets we
-build on. Both use PTS as a data-generation step. To our knowledge the
-representational question---whether the property PTS measures is present
-in the model's activations beforehand---has not been asked.
-
-\paragraph{Sentence-scale reasoning importance.} Thought Anchors
-\citep{bogdan2025thoughtanchors} identifies sentences with outsized
-influence on a reasoning trace via counterfactual resampling, receiver
-heads, and attention suppression. We work at token scale, which is where
-the $t-1$ prediction problem is well posed: a sentence boundary is not a
-decoding step.
+PTS to build preference pairs for Phi-4 post-training; \citet{pts}
+released an open implementation and event datasets. Both use PTS as a
+data-generation step; the representational question---whether the property
+is present in activations beforehand---has not to our knowledge been
+asked, nor has the relationship between PTS labels and uncertainty been
+measured.
 
 \paragraph{Uncertainty as the incumbent account.}
 \citet{wang2025beyond8020} show that roughly 20\% of tokens carry high
 entropy, act as branch points, and account for most of the gain from
-reinforcement learning with verifiable rewards. This makes next-token
-uncertainty the hypothesis any claim about token criticality must beat,
-and Section~\ref{sec:main-result} treats it accordingly. Note an asymmetry
-we return to in Section~\ref{sec:signed}: entropy is sign-blind by
-construction, so it cannot in principle account for a probe that separates
-helpful from harmful pivots.
+reinforcement learning with verifiable rewards. Section~\ref{sec:uncertainty}
+is essentially a measurement of how much of PTS's criterion this account
+already covers.
+
+\paragraph{Sentence-scale reasoning importance.} Thought Anchors
+\citep{bogdan2025thoughtanchors} identifies influential sentences by
+counterfactual resampling. We work at token scale, where the $t-1$
+prediction problem is well posed: a sentence boundary is not a decoding
+step.
 
 \paragraph{Probing and steering.} Linear probes on intermediate
-representations are standard
-\citep{alain2018understandingintermediatelayersusing,marks2024geometryoftruth},
-as is contrastive activation addition
-\citep{rimsky2024caa,huang2024steering}. Conditional steering
-\citep{lee2024conditionalactivationsteering} gates an intervention on a
-learned condition; our setting differs in what the gate conditions
-on---not a semantic category of the input, but a prospective,
-outcome-grounded property of the very next token.
-
-\paragraph{Value versus leverage.} Process reward models and value probes
-\citep{li2024qprobe} estimate $P(\text{success} \mid \text{prefix})$, a
-\emph{level}. Pivotality is $|\pdelta|$ at the next token, a
-\emph{sensitivity}. The distinction is not rhetorical: a state can be
-highly favourable and completely insensitive, or balanced and about to
-tip.
+representations \citep{alain2018understandingintermediatelayersusing,
+marks2024geometryoftruth}; contrastive activation addition
+\citep{rimsky2024caa,huang2024steering}; conditional steering
+\citep{lee2024conditionalactivationsteering}. Process reward models and
+value probes \citep{li2024qprobe} estimate
+$P(\text{success} \mid \text{prefix})$, a \emph{level}; pivotality is
+$|\pdelta|$, a \emph{sensitivity}.
 
 \section{Method}
 \label{sec:method}
 
-\subsection{Labels}
+\subsection{Generating the labels}
 \label{sec:labels}
 
-Each PTS event names a prefix and a token whose appending moved the
-success probability past $\tau$. We take the position immediately
-\emph{preceding} that token as a positive example, and sample non-pivotal
-positions from the same answer span as negatives at a 1:1 ratio.
+We reimplement token-scale PTS with the same semantics as \citet{pts} but
+express the bisection as a state machine, so that the rollouts of many
+questions can be batched together. The tree is sequential within a
+question---both children of a node need the node's own midpoint
+estimate---but questions are independent, and batching across them gives
+$8.9\times$ the generation throughput of running one node at a time.
+Emitted events carry the pivotal token's exact absolute position and the
+full searched rollout.
 
-Two construction details matter more than they appear to.
+Two construction details materially affect the result.
 
-\paragraph{Branches, not a canonical sequence.} PTS samples
-\texttt{max\_generations} rollouts per question, and they diverge after a
-few tokens. A construction that collapses a question to its longest
-rollout and matches the others against it as string prefixes silently
-discards every pivot on a diverging branch. On the released Qwen3-0.6B
-events, 104 questions carry 1{,}245 pivotal tokens spread over 447
-distinct branches, and the collapsing construction retains 318 of them.
-We instead treat every maximal token sequence as its own example,
-recovering 1{,}216 positions---$3.8\times$ more supervision from identical
-data. Because branches share prefixes, and the residual stream at position
-$p$ depends only on tokens $0 \ldots p$, we label each distinct context
-exactly once; otherwise shared early positions would enter training
-several times.
+\paragraph{Branches, not a canonical sequence.} PTS samples several
+rollouts per question and they diverge after a few tokens. A construction
+that collapses a question to its longest rollout and matches the others
+against it as string prefixes silently discards every pivot on a diverging
+branch. On the released Qwen3-0.6B events, 104 questions carry 1{,}245
+pivotal tokens over 447 distinct branches, and collapsing retains 318 of
+them---a 74\% loss. We treat every maximal branch as its own sequence, and
+because branches share prefixes (and the residual stream at position $p$
+depends only on tokens $0\ldots p$) we label each distinct context exactly
+once.
 
-\paragraph{Indices are verified, not inferred.} Released events predating
-the current schema carry no absolute position, so the index must be
-recovered by re-tokenizing the prefix. This is unsafe: byte-pair encoding
-does not guarantee
-$\mathrm{enc}(a\,{+}\,b) = \mathrm{enc}(a) \,{+}\, \mathrm{enc}(b)$, and a
-pivot token such as ``.'' frequently merges with the preceding word. We
-verify each recovered index against the reported token id, and discard
-rows that fail. On the released data this rejects 1 row in 1{,}245 rather
-than mislabelling it, and every retained label was confirmed to sit
-immediately before a reported pivot.
+\paragraph{Positions are exact, not inferred.} Byte-pair encoding does not
+guarantee $\mathrm{enc}(a\,{+}\,b) = \mathrm{enc}(a)\,{+}\,\mathrm{enc}(b)$,
+so recovering a pivot's index by re-tokenizing its prefix is unsafe: a
+pivot token such as ``.'' frequently merges with the preceding word. For
+data we generate this problem does not arise. For the released datasets,
+which predate the position field, we verify each recovered index against
+the reported token id and discard rows that fail.
 
 \subsection{Label noise in the oracle}
 \label{sec:labelnoise}
 
 $\widehat{\pdelta}$ is a difference of two binomial estimates from $S$
-rollouts each, accepted when $|\widehat{\pdelta}| \ge \tau$. Under the
-null of no true change, $\mathrm{Var}(\widehat{\pdelta}) = 2p(1-p)/S$, so
-at the reference setting $S = 50$, $\tau = 0.2$ the acceptance threshold
-sits at only $2\sigma$: roughly a 4.6\% false-acceptance rate per tested
-position at $p = 0.5$. With tens of positions tested per rollout, a
-non-trivial share of the positive class is sampling noise. This bounds
-what any probe can achieve and should be read alongside every number in
-Section~\ref{sec:results}. \TODO{quantify the clean-subset gap once we
-store sufficient statistics rather than verdicts.}
+rollouts each, accepted when $|\widehat{\pdelta}| \ge \tau$. Under the null
+of no true change $\mathrm{Var}(\widehat{\pdelta}) = 2p(1-p)/S$, so at the
+reference setting $S{=}50$, $\tau{=}0.2$ the acceptance threshold sits at
+only $2\sigma$: a false-acceptance rate near 4.6\% per tested position at
+$p{=}0.5$. We therefore store the raw counts
+$(n_{\text{before}}, s_{\text{before}}, n_{\text{after}}, s_{\text{after}})$
+rather than a verdict, which makes $\tau$ a post-hoc knob and lets every
+event carry a Wilson interval. \TODO{report the accuracy gap between the
+full label set and a high-confidence subset.}
 
-\subsection{Probes and selection discipline}
+\subsection{Probes, baselines, and how they are compared}
 \label{sec:probes}
 
 Probes are $\ell_2$-regularized logistic regressions on the residual
-stream, fit on standardized features and then converted back to raw
-activation space so that the resulting vector is usable as a direction.
-We also report the contrastive mean-difference direction
-$\mu_{+} - \mu_{-}$, computed on training data.
+stream, fit on standardized features and converted back to raw activation
+space so the resulting vector is usable as a direction. Layer and
+regularization strength are chosen on an inner split of the \emph{training}
+questions; the test split is used once.
 
-Two disciplines are enforced throughout, because relaxing either inflates
-the headline substantially (Sections~\ref{sec:reg}, \ref{sec:layers}).
-\textbf{Selection is confined to training data}: layer and $C$ are chosen
-on an inner split of the training questions, and the test split is used
-once. \textbf{Confidence intervals cluster by question}: positions drawn
-from one reasoning trace are not independent, so intervals come from a
-bootstrap over questions rather than rows.
+Baselines: token identity, as a smoothed log-odds lookup and as one-hot
+logistic regression, both fit on train and scored on held-out rows;
+next-token entropy, negative top-2 margin, and negative top-1 probability,
+computed from the model's own distribution at $t-1$; and a random unit
+direction.
 
-\subsection{Baselines}
-\label{sec:baselines}
-
-\emph{Token identity}, as a Laplace-smoothed log-odds lookup over the
-token at $t-1$, and separately as one-hot logistic regression. Both are
-fit on train and scored on held-out rows; scored in-sample, such a table
-memorizes and reports spurious skill. \emph{Next-token uncertainty}:
-entropy, negative top-2 margin, and negative top-1 probability, computed
-from the model's own distribution at $t-1$ and used directly as
-detectors in the direction the literature uses them. \emph{Random
-direction}: the mean of eight random unit projections.
+\paragraph{Comparisons are paired.} Confidence intervals are bootstrapped
+over \emph{questions}, since positions within one reasoning trace are not
+independent. Crucially, when comparing the probe against a baseline we
+bootstrap the \emph{difference} of AUROCs on the same resampled questions,
+rather than checking whether two marginal intervals overlap. The latter is
+badly conservative and would, on our data, have supported a conclusion the
+paired test rejects.
 
 \section{Experimental Setup}
 \label{sec:setup}
 
-Model: Qwen3-0.6B \citep{qwen3technicalreport}, 28 layers, $d = 1024$.
-Events: the released \texttt{codelion/Qwen3-0.6B-pts} token-granularity
-set over GSM8K \citep{cobbe2021gsm8k}, generated with raw-text
-conditioning and therefore without the model's extended-thinking mode.
-Activations are read at all 29 residual-stream positions
-($\texttt{hidden\_states}[L]$, index $0$ being the embedding output) in
-bfloat16 at the labelled positions only.
+Model: Qwen3-0.6B \citep{qwen3technicalreport}, 28 layers, $d{=}1024$.
+Task: GSM8K \citep{cobbe2021gsm8k}, conditioned on the bare question
+without a chat template, matching the released datasets and therefore
+without extended-thinking mode. Search: 3{,}000 candidate questions,
+$S{=}40$ rollouts per estimate, one searched rollout per question,
+$\tau{=}0.2$, 320 max new tokens, run on a single Blackwell-class GPU.
 
-After construction: 106 question groups over 425 branches, yielding
-1{,}216 pivotal and 1{,}187 non-pivotal positions. Split by question into
-1{,}963 training rows (85 questions) and 440 test rows (21 questions), the
-latter 50.9\% positive. Extraction takes 7.3 minutes on an Apple M3
-laptop and produces 143\,MB.
+PTS only visits questions whose baseline success probability lies inside
+$[0.2, 0.8]$: a question the model always or never solves has no pivotal
+token, because a saturated probability cannot move. Of 3{,}000 candidates,
+456 yielded at least one event, giving 688 pivotal positions and an equal
+number of sampled non-pivotal positions. Split by question: 365 train
+questions (1{,}132 rows) and 91 test questions (244 rows). Activations are
+read at all 29 residual-stream positions in bfloat16 at the labelled
+positions only.
 
 \section{Results}
 \label{sec:results}
 
-\subsection{Pivotality is decodable at $t-1$, and is not token identity}
+\subsection{Pivotality is decodable, and is not token identity}
 \label{sec:main-result}
 
-Table~\ref{tab:main} reports every detector on the held-out split at the
-selected layer ($L = 18$) and penalty ($C = 10^{-4}$).
+At the selected layer ($L{=}22$) and penalty ($C{=}10^{-3}$), the probe
+reaches \textbf{0.855 AUROC} $[0.799, 0.903]$ at accuracy 0.775 on 244
+held-out positions from 91 unseen questions. Table~\ref{tab:main} reports
+every detector, and the paired comparison that matters.
 
 \begin{table}[t]
   \centering
   \caption{Predicting whether the \emph{next} token is pivotal, from the
-  residual stream at $t-1$. Qwen3-0.6B, GSM8K, 440 held-out positions from
-  21 unseen questions. Intervals are 95\% bootstrap, clustered by
-  question.}
+  residual stream at $t-1$. Differences are bootstrapped on the same
+  resampled questions as the probe; $P(\Delta \le 0)$ is the fraction of
+  resamples in which the baseline matches or beats the probe.}
   \label{tab:main}
-  \begin{tabular}{lccc}
+  \begin{tabular}{lcccc}
     \toprule
-    Detector & AUROC & 95\% CI & Accuracy \\
+    Detector & AUROC & Probe $-$ baseline & 95\% CI & $P(\Delta \le 0)$ \\
     \midrule
-    Linear probe ($L{=}18$, $C{=}10^{-4}$) & \textbf{0.812} & $[0.739,\ 0.864]$ & 0.752 \\
-    Mean-difference direction              & 0.784 & $[0.718,\ 0.837]$ & 0.745 \\
+    Linear probe & \textbf{0.855} & --- & --- & --- \\
     \midrule
-    Token identity (frequency table)       & 0.701 & --- & 0.652 \\
-    Token identity (one-hot LR)            & 0.697 & --- & 0.652 \\
-    Next-token entropy                     & 0.628 & --- & 0.509 \\
-    Negative top-1 probability             & 0.617 & --- & 0.491 \\
-    Negative top-2 margin                  & 0.609 & --- & 0.491 \\
-    Random direction                       & 0.449 & --- & 0.455 \\
+    Token identity (freq.\ table) & 0.662 & $+0.191$ & $[+0.116, +0.258]$ & $<0.001$ \\
+    Token identity (one-hot LR)   & 0.696 & --- & --- & --- \\
+    \midrule
+    Negative top-1 probability    & 0.823 & $+0.030$ & $[-0.047, +0.110]$ & 0.233 \\
+    Negative top-2 margin         & 0.821 & $+0.032$ & $[-0.048, +0.115]$ & 0.227 \\
+    Next-token entropy            & 0.814 & $+0.039$ & $[-0.037, +0.118]$ & 0.163 \\
+    \midrule
+    Mean-difference direction     & 0.820 & --- & --- & --- \\
+    Random direction              & 0.453 & --- & --- & --- \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The probe exceeds token identity by 11 AUROC points and next-token
-entropy by 18, and the lower bound of its interval, 0.739, lies above both
-point estimates. Two readings follow. Pivotality is present in the
-residual stream one step before the token that realizes it, and it is not
-merely a property of which token is about to be emitted. And it is not the
-forking-token phenomenon: every uncertainty statistic we tested lands
-between 0.61 and 0.63, well below the probe.
+The probe exceeds token identity by 0.191 AUROC with an interval far from
+zero. So pivotality is present in the residual stream one step before the
+token that realizes it, and is not merely a property of which token is
+about to be emitted.
 
-\subsection{Regularization moves the result by 11 points}
-\label{sec:reg}
+\subsection{But it does not separate from next-token uncertainty}
+\label{sec:uncertainty}
 
-\begin{table}[t]
-  \centering
-  \caption{Effect of the inverse penalty $C$ at the selected layer. As $C$
-  falls the probe direction rotates toward the mean-difference direction
-  and performance improves monotonically.}
-  \label{tab:creg}
-  \begin{tabular}{lccc}
-    \toprule
-    $C$ & AUROC & $\cos(w, \mu_{+}{-}\mu_{-})$ & $\|w\|$ \\
-    \midrule
-    $10^{-4}$ & \textbf{0.812} & 0.639 & 0.07 \\
-    $10^{-3}$ & 0.807 & 0.338 & 0.23 \\
-    $10^{-2}$ & 0.773 & 0.158 & 0.89 \\
-    $10^{-1}$ & 0.730 & 0.095 & 2.78 \\
-    $1$       & 0.698 & 0.072 & 7.70 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+Every uncertainty statistic we tested lands between 0.814 and 0.823, and
+in each case the paired difference from the probe has a confidence
+interval containing zero. Entropy alone---one scalar, available without
+any probe---recovers most of what a trained linear readout on 1{,}024
+dimensions recovers.
 
-Table~\ref{tab:creg} shows a monotone 11-point swing across four orders of
-magnitude, with cosine similarity to the mean-difference direction rising
-from 0.07 to 0.64 as the penalty tightens. A weakly regularized probe
-still classifies, but it does so along a direction nearly orthogonal to
-the contrastive one. This is consistent with the observation that probe
-accuracy and causal relevance can come apart, and it is a concrete reason
-to report the regularization path rather than a single operating point.
+We do not think this is an artifact, and we think it is the more
+informative half of the paper. A token can only move $P(\text{success})$ if
+the continuation was not already determined; positions where the
+probability \emph{can} move are close to positions where the model is
+uncertain. On that reading, PTS's criterion is substantially an
+uncertainty criterion wearing an outcome-shaped coat, and the Phi-4
+pivotal-token line and the forking-token line \citep{wang2025beyond8020}
+have been measuring overlapping phenomena with very different instruments
+--- one costing tens of rollouts per position, the other one forward pass.
 
-\subsection{No layer is special}
-\label{sec:layers}
+The practical implication is uncomfortable for the amortization story we
+set out to tell: if the goal is to find high-leverage positions cheaply,
+entropy is already cheap and already works. The remaining case for a probe
+is the part entropy cannot do in principle, which brings us to the sign.
 
-Per-layer test accuracy at the selected $C$ spans 0.670--0.759 with mean
-0.730; AUROC spans 0.709--0.821 with mean 0.792. To ask whether the best
-layer is meaningfully best, we simulate a null in which all 29 layers are
-equally informative, each measured on 440 rows. The expected maximum under
-that null is \textbf{0.772}, which \emph{exceeds} the observed maximum of
-0.759; the observed maximum is at the 93rd percentile from below, i.e.\
-entirely unremarkable. The signal is distributed across the mid-to-late
-stack rather than localized, and reporting a single ``pivotal layer''
-would be an artifact of maximizing over correlated noise.
-
-The size of that artifact is measurable. Choosing the layer on held-out
-data and reporting it there gives 0.821; choosing it properly on training
-data and reporting on test gives 0.812---a gap of 0.009. When we
-deliberately let selection leak, the same gap widens to 0.063. Both the
-discipline and its absence are visible in the numbers.
-
-\subsection{The signed question: promising, not established}
+\subsection{The sign is not decodable at this scale}
 \label{sec:signed}
 
 Pivotality as defined in Eq.~\ref{eq:pts} is symmetric: a token that
-rescues an answer and one that ruins it receive the same label. The more
-useful question is whether the \emph{sign} is decodable at $t-1$---whether
-the model represents, one step early, that it is about to make a mistake.
+rescues an answer and one that ruins it get the same label. The sharper
+question is whether the \emph{sign} is decodable at $t-1$---whether the
+model represents, one step early, that it is about to make a mistake.
+Entropy is sign-blind by construction and cannot answer it, so a positive
+result here would be immune to Section~\ref{sec:uncertainty}.
 
 Restricting to pivotal positions and relabelling by
-$\mathrm{sign}(\pdelta)$ gives 992 training and 224 test rows (45.2\%
-helpful). A probe reaches 0.717 AUROC $[0.630, 0.790]$, against 0.586 for
-entropy and 0.366 for a random direction. That entropy is near chance here
-is expected and is the point: entropy cannot distinguish a helpful branch
-point from a harmful one, so a signed result cannot be explained by it.
+$\mathrm{sign}(\pdelta)$ gives 566 training and 122 test rows (56.5\%
+helpful). A probe reaches 0.614 AUROC, with a 95\% interval of
+$[0.482, 0.735]$ that contains chance. The signed mean-difference
+direction reaches 0.567 and token identity 0.555. We report this as a
+negative result. An earlier version of this analysis, on a smaller and
+noisier label set, gave 0.717 and looked promising; it did not survive a
+cleaner dataset with four times as many held-out questions.
 
-However, token identity reaches 0.687, which lies comfortably inside the
-probe's interval. At 21 test questions this is equally consistent with a
-real effect and with none. We therefore report the signed probe as
-unresolved rather than as a finding. It is the clearest motivation for
-scaling the number of questions, which we take up next.
+\subsection{No layer is special, and selection inflates the headline}
+\label{sec:layers}
+
+Simulating a null in which all 29 layers are equally informative, each
+measured on 244 rows, gives an expected maximum close to the observed one,
+so the identity of the ``best'' layer carries little information; the
+signal is distributed across the mid-to-late stack.
+
+The cost of getting this wrong is measurable. Choosing the layer on the
+reporting split gives 0.866; choosing it on training data and reporting on
+test gives 0.855. Under our earlier, leakier protocol the same gap was
+0.063 AUROC---large enough to manufacture a result.
+
+\subsection{Regularization}
+\label{sec:reg}
+
+AUROC moves from 0.800 at $C{=}1$ to 0.855 at $C{=}10^{-3}$, and the
+probe direction rotates toward the mean-difference direction as the penalty
+tightens (cosine 0.203 to 0.800). A weakly regularized probe still
+classifies but does so along a nearly orthogonal direction, which matters
+for anyone intending to use the probe's weights as an intervention
+direction rather than only as a classifier.
 
 \section{Limitations}
 \label{sec:limitations}
 
-Results are from a single 0.6B model on a single task family, with 21
-held-out questions; intervals are correspondingly wide and the signed
-result is underpowered. The oracle's own labels are noisy
-(Section~\ref{sec:labelnoise}) in a way we have quantified analytically
-but not yet empirically. The PTS acceptance filter retains only questions
-whose baseline success probability lies in a middle band, so pivot density
-is confounded with task difficulty relative to model capability, and the
-label distribution is not representative of all questions. Linear probes
-test linear decodability only. Finally, everything here is correlational:
-we have not yet shown that the direction the probe identifies is
-causally used by the model, and prior work cautions that probe accuracy
-does not imply causal relevance. \TODO{Causal validation via
-probe-gated intervention is the next experiment.}
+A single 0.6B model on a single task family, with 91 held-out questions.
+The oracle's labels are themselves noisy (Section~\ref{sec:labelnoise}) in
+a way we have quantified analytically but not yet empirically. The
+acceptance filter retains only mid-difficulty questions, so pivot density
+is confounded with task difficulty relative to model capability and this
+label set is not a uniform sample of GSM8K. Conditioning on the bare
+question puts an instruct model off distribution; we observed rollouts in
+which the model hallucinated multiple-choice options, and at least one
+event whose extreme $\pdelta$ traces to the answer-extraction cascade
+matching such a hallucination rather than to a genuine shift. Linear
+probes test linear decodability only. Everything here is correlational: we
+have not shown that the direction the probe identifies is causally used.
+
+Most importantly, Section~\ref{sec:uncertainty} is a null result on a
+comparison, not a proof of equivalence: 91 questions cannot rule out a
+real 4-point advantage. \TODO{Scale the question count and re-test; also
+re-run this comparison on the released label set with the fixed pipeline,
+to separate ``PTS is an uncertainty criterion'' from ``our generation
+regime made it one''.}
 
 \section{Conclusion}
 
-Pivotality---an outcome-grounded property that has so far only been
-measured by expensive offline sampling---is linearly present in a model's
-residual stream one position before the token that realizes it, at 0.812
-AUROC, and is separable from both token identity and next-token
-uncertainty. The measurement is fragile in two specific ways we
-characterize: it depends strongly on regularization, and apparent layer
-specialization does not survive a null comparison. Whether the
-\emph{direction} of the impending shift is also decodable remains open at
-this sample size, and is the natural target for scale.
+Pivotality is linearly present in a model's residual stream one position
+before the token that realizes it, at 0.855 AUROC, and is clearly
+separable from token identity. It is not separable from next-token
+uncertainty, which alone reaches 0.814---suggesting that an expensive,
+outcome-grounded, rollout-based criterion is largely recovering something a
+single forward pass already exposes. Whether the \emph{direction} of the
+impending shift carries information beyond that remains open; at this
+sample size it does not.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
@@ -413,10 +399,12 @@ this sample size, and is the natural target for scale.
 \appendix
 \section{Reproduction}
 
-All numbers in Section~\ref{sec:results} come from
-\texttt{artifacts/probes\_v2/qwen3-0.6b\_report.json}, produced by
-\texttt{scripts/build\_and\_extract.py} followed by
-\texttt{scripts/evaluate\_probes\_v2.py}. \TODO{Add layer sweep figure and
-regularization-path figure.}
+Events: \texttt{stvngo/Qwen3-0.6B-pts-tokens}. Activations:
+\texttt{stvngo/Qwen3-0.6B-pivotal-activations}. All numbers in
+Section~\ref{sec:results} come from
+\texttt{artifacts/probes\_v2\_full/qwen3-0.6b\_report.json}, produced by
+\texttt{scripts/pts\_run.py}, \texttt{scripts/build\_and\_extract.py} and
+\texttt{scripts/evaluate\_probes\_v2.py}. \TODO{Add the layer sweep and
+regularization-path figures.}
 
 \end{document}
