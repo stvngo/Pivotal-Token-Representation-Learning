@@ -192,3 +192,32 @@ def test_batched_shape_is_accepted(tmp_path: Path):
     w.add_query([h.unsqueeze(0) for h in fake_hidden(6, 1)], [2], [1], [1], [0.3], "q")
     store = ActivationStoreV2.open(w.close())
     assert store.layer(0).shape == (1, HIDDEN)
+
+
+def test_uncertainty_columns_round_trip(tmp_path: Path):
+    """Entropy / top-2 margin are the baselines the probe must beat, so they
+    are captured during extraction rather than needing a second pass."""
+    w = ActivationWriter(tmp_path / "a.safetensors", manifest(), LAYERS)
+    w.add_query(
+        fake_hidden(10, 1), [3, 7], [1, -1], [101, 102], [0.5, 0.0], "q1",
+        uncertainty=[(2.5, 0.1, 0.4), (0.2, 0.9, 0.95)],
+    )
+    store = ActivationStoreV2.open(w.close())
+    unc = store.uncertainty()
+    np.testing.assert_allclose(unc["entropy"], [2.5, 0.2], atol=1e-5)
+    np.testing.assert_allclose(unc["margin"], [0.1, 0.9], atol=1e-5)
+    np.testing.assert_allclose(unc["top1_prob"], [0.4, 0.95], atol=1e-5)
+
+
+def test_uncertainty_defaults_to_zeros_when_absent(tmp_path: Path):
+    path = write_small(tmp_path / "a.safetensors")
+    unc = ActivationStoreV2.open(path).uncertainty()
+    assert set(unc) == {"entropy", "margin", "top1_prob"}
+    assert all(len(v) == 3 for v in unc.values())
+
+
+def test_uncertainty_length_mismatch_is_caught(tmp_path: Path):
+    w = ActivationWriter(tmp_path / "a.safetensors", manifest(), LAYERS)
+    with pytest.raises(ValueError, match="align with positions"):
+        w.add_query(fake_hidden(10, 1), [3, 7], [1, -1], [1, 2], [0.5, 0.0], "q",
+                    uncertainty=[(1.0, 0.5, 0.5)])

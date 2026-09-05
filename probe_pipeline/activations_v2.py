@@ -124,6 +124,9 @@ class ActivationWriter:
         self._token_pos: list[int] = []
         self._token_id: list[int] = []
         self._prob_delta: list[float] = []
+        self._entropy: list[float] = []
+        self._margin: list[float] = []
+        self._top1_prob: list[float] = []
         self._max_abs = 0.0
         self._query_ids: list[str] = []
 
@@ -135,6 +138,7 @@ class ActivationWriter:
         token_ids: Sequence[int],
         prob_deltas: Sequence[float],
         query_id: str,
+        uncertainty: Sequence[tuple[float, float, float]] | None = None,
     ) -> None:
         """Append the labelled positions of one sequence.
 
@@ -144,6 +148,11 @@ class ActivationWriter:
                 the layers being kept.
             positions: token indices to keep, all ``< T``.
             labels, token_ids, prob_deltas: aligned with ``positions``.
+            uncertainty: optional ``(entropy, top1-top2 margin, top1 prob)``
+                per position, from the next-token distribution. These are the
+                baselines the probe has to beat -- high-entropy "forking"
+                tokens are the incumbent notion of a critical token -- so they
+                are captured here rather than needing a second pass.
         """
         import torch
 
@@ -180,6 +189,14 @@ class ActivationWriter:
         self._prob_delta.extend(float(v) for v in prob_deltas)
         self._query_idx.extend([qi] * len(positions))
 
+        unc = list(uncertainty) if uncertainty is not None else [(0.0, 0.0, 0.0)] * len(positions)
+        if len(unc) != len(positions):
+            raise ValueError("uncertainty must align with positions")
+        for ent, margin, top1 in unc:
+            self._entropy.append(float(ent))
+            self._margin.append(float(margin))
+            self._top1_prob.append(float(top1))
+
     @property
     def n_rows(self) -> int:
         return len(self._y)
@@ -206,6 +223,9 @@ class ActivationWriter:
         tensors["token_pos"] = torch.tensor(self._token_pos, dtype=torch.int32)
         tensors["token_id"] = torch.tensor(self._token_id, dtype=torch.int32)
         tensors["prob_delta"] = torch.tensor(self._prob_delta, dtype=torch.float32)
+        tensors["entropy"] = torch.tensor(self._entropy, dtype=torch.float32)
+        tensors["margin"] = torch.tensor(self._margin, dtype=torch.float32)
+        tensors["top1_prob"] = torch.tensor(self._top1_prob, dtype=torch.float32)
 
         self.manifest.n_rows = self.n_rows
         self.manifest.layers_kept = list(self.layers)
@@ -270,6 +290,23 @@ class ActivationStoreV2:
 
     def token_ids(self) -> np.ndarray:
         return self._f.get_tensor("token_id").numpy()
+
+    def uncertainty(self) -> dict[str, np.ndarray]:
+        """Next-token uncertainty at each labelled position.
+
+        These are the baselines the probe must beat: high-entropy "forking"
+        tokens are the incumbent notion of a critical token in the RLVR
+        literature, and trajectory-pivot work uses entropy and top-2 margin
+        directly as pivot detectors. Returns zeros for caches written before
+        these were recorded.
+        """
+        out = {}
+        for key in ("entropy", "margin", "top1_prob"):
+            try:
+                out[key] = self._f.get_tensor(key).numpy()
+            except Exception:
+                out[key] = np.zeros(self.manifest.n_rows, dtype=np.float32)
+        return out
 
     def xy(self, layer_num: int) -> tuple[np.ndarray, np.ndarray]:
         """``(X, y)`` with y in {0, 1}, matching ``activations.layer_arrays``.
