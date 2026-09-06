@@ -694,6 +694,77 @@ at 4B it finds it at 0.836 --- but that adding
 $\mu_{\text{helpful}} - \mu_{\text{harmful}}$ to the residual stream at
 that moment does not change what the model then does.
 
+\subsection{Four configurations, three scales, one outcome}
+\label{sec:configs}
+
+The result above uses one configuration: a cascade gate and the signed
+mean-difference direction, added to the residual stream. Three objections
+follow immediately --- that the cascade is unnecessarily elaborate, that a
+mean difference is not the probe, and that \emph{adding} a direction is the
+wrong test if the question is whether the model \emph{uses} it. We ran all
+three.
+
+\begin{table}[t]
+\centering
+\caption{Primary arm of every configuration, on band questions, greedy.
+``Probe'' is the logistic-regression weight vector; ``CAA'' a mean
+difference. Ablation removes the model's existing component along the
+direction ($\alpha{=}0$ in projection mode) rather than adding to it.}
+\label{tab:configs}
+\begin{tabular}{lllrrr}
+\toprule
+gate & direction & intervention & 0.6B & 1.7B & 4B \\
+\midrule
+cascade & signed CAA & add & $+0.007$ & $-0.013$ & $-0.015$ \\
+$P(\text{pivotal})$ & unsigned probe & add & $+0.022$ & $+0.007$ & $+0.000$ \\
+cascade & signed CAA & ablate & --- & --- & $-0.021$ \\
+cascade & signed CAA & ablate, always-on & --- & --- & $+0.000$ \\
+\midrule
+\multicolumn{3}{l}{questions} & 275 & 149 & 336 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Not one of them separates from its controls (Table~\ref{tab:configs}). The
+plain configuration --- the unsigned probe gating on $P(\text{pivotal})$
+and steering along its own weight vector, which is what the original PTS
+label most directly supports --- produces the largest single number in the
+study, $+0.022$ at 0.6B. In the same run a \emph{random} direction gets
+$+0.011$, negating the coefficient does not reverse it, and the dose is
+non-monotone. At 1.7B the same configuration is beaten by firing at random
+positions ($+0.034$ against $+0.007$); at 4B it is exactly zero.
+
+\paragraph{Ablation, and a control that is not one.} Removing the
+direction is the sharper test, and it comes with a trap. In projection
+mode $\|\delta\| = |h \cdot \hat{v}|$, so the perturbation size depends on
+how well the direction aligns with the residual stream. A random direction
+in $d{=}2560$ has projection $\approx \|h\|/\sqrt{d}$, and we measure it
+injecting \textbf{6.5$\times$ less energy} than the learned direction
+(115{,}067 against 752{,}309 summed over identical positions). A
+random-direction control is therefore \emph{not} a matched control for
+ablation, and any comparison against it overstates direction specificity.
+
+The matched contrast is the unsigned direction, whose energy is within
+15\% of the signed one. Ablating everywhere gives $+0.000$ for the signed
+direction and $+0.009$ for the unsigned --- indistinguishable. Amplifying
+everywhere gives $-0.060$ and $-0.036$. What the always-on arms track is
+how much perturbation was injected, not which learned direction carried
+it. The gated arms, which are the ones with a selectivity claim attached,
+do nothing at all.
+
+\paragraph{The multiplicity arithmetic.} Across every configuration,
+scale and band, this section ran \textbf{128 steered arms}. Six reach
+nominal $p < 0.05$; chance alone predicts \textbf{6.4}. The largest of
+them, $-0.060$ at $p{=}0.049$, is an always-on amplification arm --- a
+harm, with no gating and therefore no selectivity claim, and one whose
+random-direction counterpart also harms at a sixth of the energy.
+
+This is the same arithmetic as the round of work that preceded this paper,
+which tested 114 arms and found 4 nominal hits where chance predicted 5.7,
+and reported several of them as effects. Reporting the count is the only
+honest way to read a grid this size, and it is why every table here quotes
+a $p$-value for the pre-registered primary arm alone.
+
 \subsection{Why we read this as a null rather than a small effect}
 \label{sec:nullreading}
 
@@ -744,15 +815,15 @@ always-on additive steering, on a gentler slope because the gate fires on
 
 \paragraph{What this does and does not establish.} It does not show that
 pivotality is causally inert. It shows that this intervention --- a
-single-position additive nudge along a mean-difference direction, at
-$\|\delta\| \le 0.2\|h\|$, gated at 2--10\% duty --- does not move GSM8K
-accuracy, on 336 questions, with a resolution of roughly $\pm 0.02$. A
-real effect smaller than that would be invisible here. Three obvious
-directions remain untested: perturbing a span rather than a position (our
-hysteresis arm reached only 16\% duty), acting on attention or MLP
-outputs rather than the residual stream, and steering toward a
+single-position perturbation of the residual stream, added or ablated,
+along a mean-difference or probe-weight direction, gated at 2--10\% duty
+--- does not move GSM8K accuracy, on 336 questions, with a resolution of
+roughly $\pm 0.02$. A real effect smaller than that would be invisible
+here. Three directions remain untested: perturbing a span rather than a
+position (our hysteresis arm reached only 16\% duty), acting on attention
+or MLP outputs rather than the residual stream, and steering toward a
 \emph{target} representation rather than along a difference of means. We
-report the null because the experiment was pre-registered and the
+report the null because the experiments were pre-registered and the
 controls are unambiguous, not because we think the question is settled.
 
 \section{Limitations}

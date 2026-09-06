@@ -91,6 +91,25 @@ always-on +0.071 vs -0.025); and the dose-response is non-monotone at 4B,
 while at 1.7B it is ordered *downward* in both amount and fire rate, i.e.
 damage accumulating with perturbation size regardless of direction.
 
+**Four configurations were tested, not one**: cascade gate + signed
+mean-difference (add), plain `P(pivotal)` gate + unsigned probe weights
+(add), and ablation/amplification in projection mode. None separates from
+its controls. The plain configuration gives the study's largest single
+number (+0.022 at 0.6B) and in the same run a random direction gets
++0.011, the sign flip does not reverse it, and the dose is non-monotone.
+
+**128 steered arms; 6 reach nominal p<0.05; chance predicts 6.4.** That
+is the summary. The earlier round of this project ran 114 arms, found 4
+against 5.7 expected, and reported several as effects.
+
+**A random direction is not a matched control for ablation.** In
+projection mode ‖δ‖ = |h·v̂|, so perturbation size depends on alignment
+with the residual stream; a random direction in d=2560 injects **6.5x
+less energy** than a learned one (115,067 vs 752,309 over identical
+positions). The matched contrast is the unsigned direction, and it gives
+the same answer as the signed one -- always-on effects track injected
+energy, not direction identity.
+
 Resolution is ~±0.02 accuracy at n=336, so a smaller real effect would be
 invisible. Untested: span-level perturbation (our hysteresis arm reached
 only 16% duty), acting on attention/MLP outputs, and steering toward a
@@ -217,6 +236,13 @@ AUROC is 0.40-0.53 (chance) in every cache. Check before theorising.
 the shell running it has that string in its own command line. It also
 silently hides a job that never launched. Match on `venv/bin/python.*<script>`
 or poll the output file for a sentinel string instead.
+
+**Installing vLLM changes greedy generation.** It upgrades torch to
+2.13.0+cu130 and reinstalls torchvision, and a clean session and a
+vLLM-modified one differ by 8 of 99 answers on the same questions. Two
+clean sessions reproduced a 237-question base rate *exactly*. Never mix
+a vLLM-modified session and a clean one across arms you intend to compare;
+within-run pairing is unaffected either way.
 
 **Batch composition changes greedy output.** Left padding pads each batch
 to its own longest prompt, and in bf16 that flips a couple of answers. A
