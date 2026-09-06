@@ -231,7 +231,19 @@ draw anywhere under ~0.62 is unremarkable. When this surfaced as a 0.681 I
 first guessed an activation-norm confound; **checked and false** — norm
 AUROC is 0.40-0.53 (chance) in every cache. Check before theorising.
 
-**`pgrep -f <script>` matches the polling shell itself.** A loop like
+**`pgrep -f <script>` matches the polling shell itself** -- and this cost
+a run. Counting `pgrep -af 'steer_eval.py' | wc -l` returned 2 for a single
+live process, because `/bin/sh -c pgrep -af 'steer_eval.py'` matches its own
+command line. Reading that as two racing processes, I killed a healthy job
+45 minutes in and deleted its checkpoint. Always print the matches before
+acting on a count, and exclude the shell (`pgrep -af x | grep -v pgrep`).
+
+A second trap sat behind it: a crashed process holding an open descriptor
+to a log that a later launch truncated with `>` keeps writing at its old
+offset, so one log can interleave a live run's output with a dead run's
+traceback. A traceback in a log does not mean the current process died.
+
+**The original form of this trap:** A loop like
 `until ! pgrep -f compare_baselines; do sleep; done` never exits, because
 the shell running it has that string in its own command line. It also
 silently hides a job that never launched. Match on `venv/bin/python.*<script>`
