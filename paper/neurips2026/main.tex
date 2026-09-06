@@ -470,6 +470,35 @@ lookup on the current token cannot encode the sign of a token that has not
 been emitted --- so the $t-1$ column is the one that isolates representation
 from vocabulary.
 
+\subsection{What the probe amortizes}
+\label{sec:amortization}
+
+PTS is an instrument, not a mechanism, and it is an expensive one. Isolating
+the pivots in a single searched query cost a measured $14.1$ / $15.8$ /
+$14.4$ bisection midpoints at 0.6B / 1.7B / 4B, each of which is $S{=}40$
+rollouts of up to $320$ tokens: roughly $1.8$--$2.0 \times 10^{5}$ generated
+tokens per query. At the usual $2N$ floating-point operations per generated
+token, that is $2.2 \times 10^{14}$, $6.9 \times 10^{14}$ and $1.5 \times
+10^{15}$ operations respectively.
+
+The probe's judgment is one dot product per position. Over the same
+$320$-position rollout that is $2dT$ operations --- $6.6 \times 10^{5}$ at
+0.6B, $1.3 \times 10^{6}$ at 1.7B, $1.6 \times 10^{6}$ at 4B. The ratio is
+$3.3 \times 10^{8}$, $5.2 \times 10^{8}$ and $9.0 \times 10^{8}$: between
+eight and nine orders of magnitude, widening with scale because the search
+cost grows with $N$ while the probe's grows with $d$.
+
+Two qualifications, both of which matter more than the ratio. The probe
+reads the residual stream of a forward pass that generation is performing
+anyway, so this is a \emph{marginal} cost --- the comparison is fair for a
+monitor running alongside decoding, and unfair as a claim about replacing
+PTS offline. And the substitution is lossy: at 0.807--0.897 AUROC the probe
+approximates the oracle's verdict rather than reproducing it. The honest
+statement is that a judgment which costs a fifth of a million generated
+tokens to make exactly can be approximated, imperfectly, for free during
+decoding --- which is what makes gating an intervention on it conceivable
+at all.
+
 \subsection{No layer is special, and selection inflates the headline}
 \label{sec:layers}
 
