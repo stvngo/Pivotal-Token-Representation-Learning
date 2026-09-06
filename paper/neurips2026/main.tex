@@ -38,6 +38,7 @@
 \author{%
   Steven Ngo\thanks{Dataset and code will be provided upon acceptance.} \\
   University of California, San Diego \\
+  3234 Matthews Ln, La Jolla, CA 92093 \\
   \texttt{svngo@ucsd.edu} \\
 }
 
@@ -57,18 +58,15 @@ GSM8K questions each, we find pivotality is linearly decodable at $t{-}1$
 at every scale (AUROC $0.807$--$0.897$), above token identity and
 every next-token uncertainty statistic (entropy, top-2 margin, top-1 probability), 
 with all comparisons bootstrapped over questions on paired resamples. 
-The informative pattern is how the margin \emph{scales}: 
-probe AUROC rises with model size while entropy stays flat, 
-so the advantage over predictive uncertainty widens
+Probe AUROC rises with model size while entropy stays flat, 
+thus, the advantage over predictive uncertainty widens
 from $+0.112$ to $+0.204$. The \emph{sign} of the impending shift,
 whether the next token will help or hurt the success probability, is decodable too, 
-but only in the larger models. At 0.6B the signed probe is
+though only in the larger models. At 0.6B, the signed probe is
 indistinguishable from a random direction; at 4B it reaches $0.780$
-AUROC, clearing token identity, next-token uncertainty, and a random
-direction alike. Uncertainty cannot account for this, because entropy is
-blind to sign by construction. Additionally, we perform causal intervention across four families, 
-three scales and 128 steered arms, finding that steering does not measurably change GSM8K accuracy, 
-and that no configuration separates from a matched control firing at random positions
+AUROC above other baselines. Additionally, we perform causal intervention across four families, 
+three scales and 128 configurations, finding that steering does not measurably change GSM8K accuracy, 
+and that no probe separates from a matched control firing at random positions
 or steering along a random direction.
 \end{abstract}
 
@@ -86,19 +84,18 @@ the estimated probability of eventually solving the task past a threshold,
               - P(\text{success} \mid \text{prefix}) \bigr| > \tau .
 \end{equation}
 Estimating either term requires sampling many completions and adjudicating
-each with an oracle, so PTS is an offline instrument that costs tens of
+each with an oracle, rendering PTS an offline instrument that costs tens of
 rollouts per candidate position.
 
 Our starting question was whether that instrument can be amortized: is
 pivotality linearly decodable from the residual stream at $t-1$, before the
-token is produced? A probe read one step early is a different object from
+token is produced? A probe monitoring one step early is a different object from
 one read at the pivotal token itself---the latter is a post-hoc
-classifier, the former is available while there is still a decision to
-influence.
-
-It is. But the more informative result is \emph{what else} predicts it.
-The question is only interesting if the answer is not already known for a
-cheaper reason, and two cheaper reasons exist. \emph{Token identity}: some
+classifier, which may enable a cheaper alternative to PTS, 
+while the former is available while there is still a decision to
+influence. We find evidence that supports in favor of this hypothesis. 
+But the more informative result is \emph{what else} predicts it.
+We examine two cheaper explanations for pivotality. \emph{Token identity}: some
 tokens may simply be pivotal more often, in which case a lookup table
 suffices and no representation is implicated. \emph{Next-token
 uncertainty}: high-entropy ``forking'' tokens are the incumbent notion of
@@ -180,11 +177,9 @@ question---both children of a node need the node's own midpoint
 estimate---but questions are independent, and batching across them gives
 $8.9\times$ the generation throughput of running one node at a time.
 Emitted events carry the pivotal token's exact absolute position and the
-full searched rollout.
+full searched rollout. Two construction details materially affect the result.
 
-Two construction details materially affect the result.
-
-\paragraph{Branches, not a canonical sequence.} PTS samples several
+\paragraph{Branches versus a canonical sequence.} PTS samples several
 rollouts per question and they diverge after a few tokens. A construction
 that collapses a question to its longest rollout and matches the others
 against it as string prefixes silently discards every pivot on a diverging
@@ -206,7 +201,7 @@ the reported token id and discard rows that fail.
 \subsection{Probes, baselines, and how they are compared}
 \label{sec:probes}
 
-Probes are $\ell_2$-regularized logistic regressions on the residual
+Linear probes are $\ell_2$-regularized logistic regressions on the residual
 stream, fit on standardized features and converted back to raw activation
 space so the resulting vector is usable as a direction. Layer and
 regularization strength are chosen on an inner split of the \emph{training}
@@ -251,9 +246,13 @@ raw conditioning, none of these models is close to saturating GSM8K.
   candidate questions whose baseline success probability fell inside the
   searchable band.}
   \label{tab:data}
+  \small
+  \setlength{\tabcolsep}{4pt}
   \begin{tabular}{lccccc}
     \toprule
-    Model & Qualifying & Questions w/ events & Pivotal positions & Test questions & Test rows \\
+    Model & Qualifying & \shortstack{Questions\\w/ events} &
+    \shortstack{Pivotal\\positions} & \shortstack{Test\\questions} &
+    \shortstack{Test\\rows} \\
     \midrule
     Qwen3-0.6B & 0.40 & 456 & 688 & 91 & 232 \\
     Qwen3-1.7B & 0.45 & 520 & 835 & 104 & 287 \\
@@ -286,6 +285,7 @@ questions. The probe separates from every baseline at every scale.
   unremarkable.}
   \label{tab:main}
   \small
+  \setlength{\tabcolsep}{3pt}
   \begin{tabular}{lccc}
     \toprule
     Detector & Qwen3-0.6B & Qwen3-1.7B & Qwen3-4B \\
@@ -958,12 +958,25 @@ than only as a classifier.
 
 \section{Reproduction}
 
-Events: \texttt{stvngo/Qwen3-0.6B-pts-tokens}. Activations:
-\texttt{stvngo/Qwen3-0.6B-pivotal-activations}. All numbers in
-Section~\ref{sec:results} come from
-\texttt{artifacts/probes\_v2\_full/qwen3-0.6b\_report.json}, produced by
-\texttt{scripts/pts\_run.py}, \texttt{scripts/build\_and\_extract.py} and
-\texttt{scripts/evaluate\_probes\_v2.py}. \TODO{Add the layer sweep and
-regularization-path figures.}
+Every number in this paper traces to an artifact produced by the pipeline
+described here; nothing is carried over from earlier runs of this project.
+
+\begin{itemize}\setlength{\itemsep}{2pt}
+  \item \emph{Pivotal-token events}, one dataset per scale:\\
+        \texttt{Qwen3-\{0.6B,\,1.7B,\,4B\}-pts-tokens}
+  \item \emph{Labelled activations} at $t{-}1$, one per scale:\\
+        \texttt{Qwen3-\{0.6B,\,1.7B,\,4B\}-pivotal-activations}
+  \item \emph{Search state and evaluation outputs}: \texttt{ptrl-runs}
+\end{itemize}
+
+\noindent
+The search is \texttt{pts\_run.py}; datasets are built and activations
+extracted by \texttt{build\_and\_extract.py}; probes and baselines are
+fit and compared by \texttt{evaluate\_probes\_v2.py} and
+\texttt{compare\_baselines.py}, which selects layer and $C$ on an inner
+split of train and bootstraps paired differences over questions. For the
+causal section, \texttt{screen\_band.py} estimates the acceptance band,
+\texttt{fit\_steering\_probes.py} fits the directions on train alone, and
+\texttt{steer\_eval.py} runs the arms.
 
 \end{document}
