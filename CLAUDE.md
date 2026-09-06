@@ -182,6 +182,13 @@ the shell running it has that string in its own command line. It also
 silently hides a job that never launched. Match on `venv/bin/python.*<script>`
 or poll the output file for a sentinel string instead.
 
+**Batch composition changes greedy output.** Left padding pads each batch
+to its own longest prompt, and in bf16 that flips a couple of answers. A
+32-prompt identity check against a 48-prompt base batch fails for reasons
+that have nothing to do with the hook under test. Greedy decoding gives
+exact pairing between arms only because every arm shares one prompt list
+and one set of batch boundaries -- never across differently-batched runs.
+
 **zsh does not word-split unquoted expansions.** A launch loop of the form
 `for pair in "sess model"; do set -- $pair; ...` passes the *whole string*
 as `$1` and leaves `$2` empty. Under bash this works; under zsh every job
