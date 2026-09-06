@@ -255,14 +255,25 @@ def main() -> None:
         return float(np.quantile(p if scores is None else scores, 1.0 - rate))
 
     # -- identity: the hook plumbing itself must be a no-op ----------------
-    small = prompts[: min(32, len(prompts))]
-    ident, _ = run_arm(model, tok, small, golds[: len(small)], name="identity",
+    # Exactly one full batch, so the comparison is against the base run's
+    # *first* batch and nothing else differs. Left padding pads each batch to
+    # its own longest prompt, and in bf16 that is enough to flip a couple of
+    # greedy answers -- so a 32-prompt check against a 48-prompt base batch
+    # fails for reasons that have nothing to do with the hook. Arms are
+    # exactly paired only because they all share these batch boundaries.
+    n_id = min(a.batch_size, len(prompts))
+    small = prompts[:n_id]
+    ident, _ = run_arm(model, tok, small, golds[:n_id], name="identity",
                        max_new_tokens=a.max_new_tokens, batch_size=a.batch_size,
                        hook_kwargs=dict(base_kw, vector=v_signed, coef=0.0,
                                         gate_mode=MODE_ALWAYS_ON))
-    ok = ident.correct_mask == base_mask[: len(small)]
-    results["identity_check"] = {"passed": bool(ok), "n": len(small)}
-    print(f"[2] identity (coef=0, always on): {'PASS' if ok else 'FAIL'}", flush=True)
+    diff = [i for i, (x, y) in enumerate(zip(ident.correct_mask, base_mask[:n_id]))
+            if x != y]
+    ok = not diff
+    results["identity_check"] = {"passed": bool(ok), "n": n_id,
+                                 "n_mismatched": len(diff)}
+    print(f"[2] identity (coef=0, always on): {'PASS' if ok else 'FAIL'} "
+          f"({len(diff)}/{n_id} mismatched)", flush=True)
     if not ok:
         print("    the hook changes generation at coef=0; stopping", flush=True)
         Path(a.out or "/content/steer.json").write_text(json.dumps(results, indent=2))
