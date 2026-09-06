@@ -99,6 +99,7 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
     # generate_batched. Rather than reach inside, run batch by batch here.
     resp, nnew, stats = [], [], []
     p_all, piv_all, help_all, norm_all = [], [], [], []
+    norm_kept = []   # ||h|| at perturbed, non-padding positions
     for i in range(0, len(prompts), batch_size):
         chunk = list(prompts[i:i + batch_size])
         hook = CascadeSteeringHook(model, **hook_kwargs)
@@ -121,6 +122,9 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
                 if keep is None:
                     keep = np.arange(arr.shape[0])[:, None] < np.asarray(k)[None, :]
                 sink.append(arr[keep])
+            pert = np.stack(hook.stats.perturbed)
+            norms = np.stack(hook.stats.h_norm)
+            norm_kept.append(norms[keep & pert])
         hook.reset()
 
     agg = {
@@ -130,6 +134,15 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
         "energy": sum(s["energy"] for s in stats),
     }
     agg["n_positions_trimmed"] = sum(s["n_positions_trimmed"] for s in stats)
+    # Energy over each row's *real* generated tokens. The raw sum includes the
+    # padding positions that keep being stepped after a row emits EOS, and
+    # always-on perturbs all of them while a 5% gate mostly does not -- which
+    # made a correctly matched pair look mismatched by 1.9x. In
+    # additive_normalized ||delta|| is exactly |coef|*||h||, so this is
+    # recoverable from what is already recorded.
+    agg["energy_trimmed"] = abs(hook_kwargs.get("coef", 0.0)) * float(
+        np.concatenate(norm_kept).sum() if norm_kept else 0.0
+    )
     agg["duty_cycle"] = (agg["n_fired"] + agg["n_held"]) / max(1, agg["n_positions"])
     agg["fire_rate"] = agg["n_fired"] / max(1, agg["n_positions"])
     # Weighted by each batch's real generated positions, so a short final
@@ -288,7 +301,8 @@ def main() -> None:
         d["primary"] = primary
         results[nm] = d
         print(f"    {nm:<24} acc {arm.accuracy:.4f} ({d['delta_acc']:+.4f})  "
-              f"duty {st.get('duty_cycle_trimmed', 0):.3f}  energy {st.get('energy', 0):.0f}  "
+              f"duty {st.get('duty_cycle_trimmed', 0):.3f}  "
+              f"energy {st.get('energy_trimmed', 0):.0f}  "
               f"net {d['vs_base']['net']:+d}  p {d['vs_base']['p']:.3f}", flush=True)
         return d
 
@@ -305,6 +319,8 @@ def main() -> None:
     # Match injected energy, not duty cycle: sum_{would fire} ||h|| over
     # sum_{all} ||h||, measured in the observe pass. The gate concentrates on
     # high-norm positions, so duty-matching alone left always-on ~20% short.
+    # obs["h_norm"] is already trimmed to real tokens, so this fraction and
+    # the energy_trimmed it is matched against are on the same footing.
     hn, fired_mask = obs["h_norm"], p > thresh(a.rate)
     energy_frac = float(hn[fired_mask].sum() / max(hn.sum(), 1e-9))
     results["energy_match"] = {"duty_estimate": float(fired_mask.mean()),
