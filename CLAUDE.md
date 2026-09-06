@@ -271,6 +271,14 @@ clean sessions reproduced a 237-question base rate *exactly*. Never mix
 a vLLM-modified session and a clean one across arms you intend to compare;
 within-run pairing is unaffected either way.
 
+**The Colab CLI reuses stale local session names.** After a prune and
+re-adopt, a session can come back under the name of an older, dead one:
+during the MATH runs the session holding the **32B** job was listed
+locally as `ptrl-4b`. Nothing breaks on its own, but launching onto a name
+without checking what it is running will clobber a live job. Confirm with
+`pgrep -af pts_run.py` on the VM, which reports the actual `--model`,
+rather than trusting the name.
+
 **Batch composition changes greedy output.** Left padding pads each batch
 to its own longest prompt, and in bf16 that flips a couple of answers. A
 32-prompt identity check against a 48-prompt base batch fails for reasons
