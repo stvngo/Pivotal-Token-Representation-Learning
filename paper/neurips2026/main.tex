@@ -613,129 +613,91 @@ mean-difference direction, added to the residual stream. Three objections
 follow immediately --- that the cascade is unnecessarily elaborate, that a
 mean difference is not the probe, and that \emph{adding} a direction is the
 wrong test if the question is whether the model \emph{uses} it. We ran all
-three.
+three, at the same $n{=}336$ (Table~\ref{tab:eq}).
 
-\begin{table}[t]
-\centering
-\caption{Primary arm of every configuration, on band questions, greedy.
-``Probe'' is the logistic-regression weight vector; ``CAA'' a mean
-difference. Ablation removes the model's existing component along the
-direction ($\alpha{=}0$ in projection mode) rather than adding to it.}
-\label{tab:configs}
-\begin{tabular}{lllrrr}
-\toprule
-gate & direction & intervention & 0.6B & 1.7B & 4B \\
-\midrule
-cascade & signed CAA & add & $+0.007$ & $-0.013$ & $-0.015$ \\
-$P(\text{pivotal})$ & unsigned probe & add & $+0.022$ & $+0.007$ & $+0.000$ \\
-cascade & signed CAA & ablate & --- & --- & $-0.021$ \\
-cascade & signed CAA & ablate, always-on & --- & --- & $+0.000$ \\
-\midrule
-\multicolumn{3}{l}{questions} & 275 & 149 & 336 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Not one of them separates from its controls (Table~\ref{tab:configs}). The
-plain configuration --- the unsigned probe gating on $P(\text{pivotal})$
-and steering along its own weight vector, which is what the original PTS
-label most directly supports --- produces the largest single number in the
-study, $+0.022$ at 0.6B. In the same run a \emph{random} direction gets
-$+0.011$, negating the coefficient does not reverse it, and the dose is
-non-monotone. At 1.7B the same configuration is beaten by firing at random
-positions ($+0.034$ against $+0.007$); at 4B it is exactly zero.
+The plain configuration is the one a reader would try first: the unsigned
+probe gating on $P(\text{pivotal})$ and steering along its own weight
+vector, which is what the PTS label most directly supports. It gives
+$+0.018$, $-0.015$ and $+0.000$ across the three scales. At 0.6B, where it
+is largest, its own sign-flipped arm gives $-0.012$; at 1.7B, where it is
+negative, the sign-flipped arm gives $+0.042$ and so \emph{beats} it. An
+intervention whose reversal outperforms it is not an intervention.
 
 \paragraph{Ablation, and a control that is not one.} Removing the
-direction is the sharper test, and it comes with a trap. In projection
-mode $\|\delta\| = |h \cdot \hat{v}|$, so the perturbation size depends on
-how well the direction aligns with the residual stream. A random direction
-in $d{=}2560$ has projection $\approx \|h\|/\sqrt{d}$, and we measure it
-injecting \textbf{6.5$\times$ less energy} than the learned direction
-(115{,}067 against 752{,}309 summed over identical positions). A
-random-direction control is therefore \emph{not} a matched control for
-ablation, and any comparison against it overstates direction specificity.
+direction is the sharper test of whether the model uses it, and it comes
+with a trap. In projection mode $\|\delta\| = |h \cdot \hat{v}|$, so the
+perturbation size depends on how well the direction aligns with the
+residual stream. A random direction in $d{=}2560$ has projection
+$\approx \|h\|/\sqrt{d}$, and we measure it injecting \textbf{6.5$\times$
+less} than the learned direction at 4B (115{,}067 against 752{,}309 summed
+over identical positions). A random-direction control is therefore
+\emph{not} matched for ablation, and comparing against it overstates
+direction specificity.
 
-The matched contrast is the unsigned direction, whose energy is within
-15\% of the signed one. Ablating everywhere gives $+0.000$ for the signed
-direction and $+0.009$ for the unsigned --- indistinguishable. Amplifying
-everywhere gives $-0.060$ and $-0.036$. What the always-on arms track is
-how much perturbation was injected, not which learned direction carried
-it. The gated arms, which are the ones with a selectivity claim attached,
-do nothing at all.
+The always-on arms make the point without needing that control. Amplifying
+the direction at every position gives $-0.071$ at 0.6B, $\mathbf{+0.068}$
+at 1.7B and $-0.060$ at 4B: the sign is not even consistent across scales,
+so this is not a dose effect being mistaken for a directional one --- it is
+noise at a magnitude large enough to move accuracy in whichever direction
+it happens to move it. At 0.6B the ordering is instructive on its own. The
+\emph{unsigned} direction, whose label $|\pdelta| > \tau$ is sign-symmetric
+and therefore has no meaningful polarity, does three times the damage of
+the signed one ($-0.208$ against $-0.071$) --- because it injects twice the
+energy, not because it means more.
 
-\paragraph{The multiplicity arithmetic.} Across every configuration,
-scale and band, this section ran \textbf{128 steered arms}. Six reach
-nominal $p < 0.05$; chance alone predicts \textbf{6.4}. The largest of
-them, $-0.060$ at $p{=}0.049$, is an always-on amplification arm --- a
-harm, with no gating and therefore no selectivity claim, and one whose
-random-direction counterpart also harms at a sixth of the energy.
-
-This is the same arithmetic as the round of work that preceded this paper,
-which tested 114 arms and found 4 nominal hits where chance predicted 5.7,
-and reported several of them as effects. Reporting the count is the only
-honest way to read a grid this size, and it is why every table here quotes
-a $p$-value for the pre-registered primary arm alone.
+The gated arms, which are the ones carrying a selectivity claim, do
+nothing at any scale: $+0.027$, $+0.006$, $-0.021$.
 
 \subsection{Why we read this as a null rather than a small effect}
 \label{sec:nullreading}
 
-Three pieces of evidence, none of which depends on a $p$-value.
+Three pieces of evidence, none of which is a $p$-value.
 
-\paragraph{Negating the coefficient never hurts.} At all three scales the
-sign-flipped arm matches or beats the primary: $+0.018$ against $+0.007$,
-$-0.013$ against $-0.013$, $+0.009$ against $-0.015$. A direction with
-causal polarity cannot behave this way. The earlier round of this project
-saw the same signature --- coefficients $+0.96$ and $-1.04$ with identical
-$\|\delta\|$, both above baseline --- and read it as a dose-response.
+\paragraph{Reversing the direction does not reverse the result.} If the
+signed direction carried the effect, negating its coefficient should
+invert the sign of the change. It does not. On the primary configuration
+the flipped arm gives $-0.003$, $+0.000$ and $-0.009$ against a primary of
+$+0.000$, $+0.003$ and $-0.048$; on the plain configuration it gives
+$-0.012$, $+0.042$ and $-0.021$ against $+0.018$, $-0.015$ and $+0.000$.
+The flipped arm is not the primary's mirror image, it is simply another
+draw from the same noise. Our earlier round of this project saw the same
+signature --- coefficients $+0.96$ and $-1.04$ with identical
+$\|\delta\|$, both scoring above baseline --- and read it as a
+dose-response.
 
-\paragraph{Disjoint halves of the same population disagree in sign.} GSM8K
-train and test index different questions, so the 4B band was evaluated as
-two runs. They point opposite ways on every arm:
+\paragraph{The same experiment, run twice, disagrees by more than the
+effect.} The 4B additive test half was evaluated twice on the same 99
+questions, with the same model, probe, layer and coefficient. One run gave
+$+0.030$, the other $-0.081$: a spread of $0.111$, larger than any effect
+reported in this section. Part of that traces to the inference stack (the
+two runs used different builds and their unsteered baselines differ by 8
+questions), but most of it is simply that roughly fifteen discordant pairs
+cannot resolve an effect. Which half is pooled decides whether the primary
+arm at 4B looks significant: $p{=}0.020$ with one, $p{=}0.551$ with the
+other. This is the reason every configuration in Table~\ref{tab:eq} is
+reported at a common $n{=}336$ rather than at whatever each model's band
+happened to supply.
 
-\begin{center}
-\begin{tabular}{lrr}
-\toprule
-arm & test half ($n{=}99$) & train half ($n{=}237$) \\
-\midrule
-reactive (primary) & $+0.030$ & $-0.034$ \\
-always-on, matched energy & $+0.071$ & $-0.025$ \\
-coefficient negated & $+0.040$ & $-0.004$ \\
-random placement & $+0.000$ & $-0.017$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-Same model, same probe, same layer, same coefficient, two disjoint samples
-from one uncertainty band. Reported alone, the test half is a rising
-dose-response with a $+0.071$ always-on arm; the train half is a monotone
-degradation. Both are noise, and only running both makes that visible.
-This was not a designed replication --- it fell out of train and test
-indexing differently --- but it is the most useful thing in the section,
-because it measures the noise floor on the same axis as the effect.
-
-\paragraph{The dose-response is not monotone where it matters.} At 4B,
-$\alpha \in \{0.02, 0.05, 0.10, 0.20\}$ gives
-$\{-0.015, -0.015, +0.009, -0.009\}$: no ordering. At 1.7B it \emph{is}
-ordered, $\{+0.000, -0.013, -0.040, -0.054\}$, and monotonically
-\emph{downward}, as is the fire-rate sweep
-$\{+0.027, -0.013, -0.047\}$. Where a dose-response exists at all it
-describes damage accumulating with perturbation size, independent of
-direction --- consistent with the destructive regime reported for
-always-on additive steering, on a gentler slope because the gate fires on
-5\% of positions.
+\paragraph{A random direction does nearly as much.} At 4B, three
+independent random directions at the same duty cycle and coefficient give
+$-0.024$, $-0.028$ and $-0.028$, against the signed direction's $-0.048$.
+One of those draws reaches $p{=}0.039$ on its own. Whatever the primary
+arm is measuring, a direction with no relationship to pivotality measures
+most of it too.
 
 \paragraph{What this does and does not establish.} It does not show that
-pivotality is causally inert. It shows that this intervention --- a
-single-position perturbation of the residual stream, added or ablated,
-along a mean-difference or probe-weight direction, gated at 2--10\% duty
---- does not move GSM8K accuracy, on 336 questions, with a resolution of
-roughly $\pm 0.02$. A real effect smaller than that would be invisible
-here. Three directions remain untested: perturbing a span rather than a
-position (our hysteresis arm reached only 16\% duty), acting on attention
-or MLP outputs rather than the residual stream, and steering toward a
-\emph{target} representation rather than along a difference of means. We
-report the null because the experiments were pre-registered and the
-controls are unambiguous, not because we think the question is settled.
+pivotality is causally inert. It shows that this family of interventions
+--- a single-position perturbation of the residual stream, added or
+ablated, along a mean-difference or probe-weight direction, gated at
+2--10\% duty --- does not measurably change GSM8K accuracy on 336
+questions, where the resolution is roughly $\pm 0.02$. A real effect
+smaller than that would be invisible here. Three directions remain
+untested: perturbing a span rather than a position (our hysteresis arm
+reached only 16\% duty), acting on attention or MLP outputs rather than
+the residual stream, and steering toward a \emph{target} representation
+rather than along a difference of means. We report the null because the
+experiments were pre-registered and the controls are unambiguous, not
+because we think the question is settled.
 
 \section{Limitations}
 \label{sec:limitations}
@@ -790,19 +752,22 @@ scores below chance), and from a random direction. That the signed signal
 is closely approximated by a contrastive mean-difference direction makes it
 the natural object for a causal test.
 
-That test is negative. Gating an additive intervention along
-$\mu_{\text{helpful}} - \mu_{\text{harmful}}$ on the probe changes GSM8K
-accuracy by $-0.015$ at 4B on 336 questions in the uncertainty band, with
-every control indistinguishable from it, and the same null at both smaller
-scales. The detector is not what fails: at the layer the intervention acts
-on, the cascade identifies harmful pivots at 0.836 AUROC. Reading and
-acting on a representation are different things, and this work establishes
-the first without the second. The negative result is sharper than a
-missing experiment would be, because it isolates where the gap lies, and
-because the controls --- a sign-flipped arm that never underperforms the
-primary, and two disjoint halves of one population that disagree in sign
-on every arm --- make the size of the noise floor explicit rather than
-leaving it to be inferred.
+That test is negative. Across three intervention families and three
+scales, each on the same 336 in-band questions, eight of nine
+configurations leave GSM8K accuracy unchanged, and the ninth is matched by
+random directions run under identical settings. The detector is not what
+fails: at the layer the intervention acts on, the cascade identifies
+harmful pivots at 0.836 AUROC. Reading a representation and acting on it
+are different things, and this work establishes the first without the
+second.
+
+The negative result is sharper than a missing experiment would be, because
+it says where the gap is rather than leaving it open, and because the
+controls put a number on the noise. Reversing the direction does not
+reverse the outcome; a random direction reproduces most of the largest
+effect; and running one half of the evaluation twice moved it by more than
+any effect we report. Those three facts constrain what a future
+intervention has to clear.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
