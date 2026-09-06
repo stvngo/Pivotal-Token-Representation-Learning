@@ -80,10 +80,22 @@ whether the base arm got a question right would condition on a random
 outcome, and regression to the mean would then flatter any intervention.
 
 Steering layers, chosen on an inner split of train by max-min of the
-unsigned and signed AUROCs (`scripts/fit_steering_probes.py`): **11 at
-0.6B, 21 at 4B**. The 4B pick lands on the same layer the independent
-signed-probe evaluation chose, and its inner-split signed AUROC (0.758)
-matches the held-out 0.780.
+unsigned and signed AUROCs (`scripts/fit_steering_probes.py`): **11 / 25 /
+21**. These are *not* independent confirmation of the signed probe's own
+layer choice, and an earlier note here claimed they were. Signed AUROC is
+far below unsigned at every layer, so it is always the binding constraint
+and max-min reduces to the signed argmax; `compare_baselines.py` and
+`fit_steering_probes.py` then run the same selection over the same rows
+with the same split seed, and necessarily agree. It is a determinism
+check, not evidence about layers.
+
+The cost of sharing a layer falls entirely on the gate, and is small:
+on **test**, the gate scores 0.798 / 0.869 / **0.922** at the steering
+layer against the paper's headline 0.807 / 0.863 / 0.897 at each task's
+own layer. Note the 4B gate is *better* there — which is exactly why it
+must not be promoted to the headline. That layer was chosen by a different
+objective, and swapping to it after seeing test scores is selection on
+test.
 
 ## Conventions that must not drift
 

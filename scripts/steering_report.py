@@ -36,6 +36,63 @@ def load(path: Path) -> dict:
     return d
 
 
+def exact_mcnemar(gained: int, lost: int) -> float:
+    """Two-sided exact McNemar from pooled discordant counts."""
+    from math import comb
+
+    n = gained + lost
+    if n == 0:
+        return 1.0
+    k = min(gained, lost)
+    return min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / (2 ** n))
+
+
+def pool(runs: list[dict]) -> dict:
+    """Combine runs of one model over disjoint question sets.
+
+    Accuracy pools by summing correct answers over summed questions; the
+    McNemar test pools by summing gained and lost, which is valid because
+    the discordant pairs come from disjoint question sets. Duty cycle and
+    energy are weighted by each run's decode positions.
+    """
+    out = {"_path": "pooled", "_meta": dict(runs[0].get("_meta", {}))}
+    out["_meta"]["model"] = runs[0]["_meta"]["model"] + " (pooled)"
+    n = sum(r["base"]["n"] for r in runs)
+    out["base"] = {"accuracy": sum(r["base"]["n_correct"] for r in runs) / n,
+                   "n": n, "n_correct": sum(r["base"]["n_correct"] for r in runs)}
+    pos = [r.get("observe", {}).get("n_decode_positions", 1) or 1 for r in runs]
+    out["observe"] = {"n_decode_positions": sum(pos)}
+    out["identity_check"] = {
+        "passed": all(r.get("identity_check", {}).get("passed") for r in runs),
+        "n": sum(r.get("identity_check", {}).get("n", 0) for r in runs),
+        "n_mismatched": sum(r.get("identity_check", {}).get("n_mismatched", 0)
+                            for r in runs),
+    }
+    keys = {k for r in runs for k, v in r.items()
+            if isinstance(v, dict) and "vs_base" in v}
+    for k in keys:
+        have = [r for r in runs if k in r]
+        nk = sum(r[k]["n"] for r in have)
+        g = sum(r[k]["vs_base"]["gained"] for r in have)
+        lo = sum(r[k]["vs_base"]["lost"] for r in have)
+        acc = sum(r[k]["n_correct"] for r in have) / nk
+        w = [r.get("observe", {}).get("n_decode_positions", 1) or 1 for r in have]
+        out[k] = {
+            "accuracy": acc, "n": nk,
+            "n_correct": sum(r[k]["n_correct"] for r in have),
+            "delta_acc": acc - out["base"]["accuracy"],
+            "duty_cycle_trimmed": sum(
+                r[k].get("duty_cycle_trimmed", 0) * wi for r, wi in zip(have, w)
+            ) / max(sum(w), 1),
+            "energy": sum(r[k].get("energy_trimmed", r[k].get("energy", 0))
+                          for r in have),
+            "primary": any(r[k].get("primary") for r in have),
+            "vs_base": {"gained": g, "lost": lo, "net": g - lo,
+                        "p": exact_mcnemar(g, lo)},
+        }
+    return out
+
+
 def fmt(d: dict, key: str) -> str:
     a = d.get(key)
     if a is None:
@@ -53,9 +110,17 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="+")
     ap.add_argument("--out", default=None, help="write the LaTeX table here")
+    ap.add_argument("--pool", action="store_true",
+                    help="combine runs of the same model over disjoint question "
+                         "sets. GSM8K train and test index different questions, "
+                         "so the 4B band had to be evaluated as two runs; "
+                         "McNemar's discordant counts come from disjoint sets "
+                         "and add directly, so the pooled test is exact.")
     a = ap.parse_args()
 
     runs = [load(Path(f)) for f in a.files]
+    if a.pool and len(runs) > 1:
+        runs = [pool(runs)] + runs
 
     for d in runs:
         m = d.get("_meta", {})
