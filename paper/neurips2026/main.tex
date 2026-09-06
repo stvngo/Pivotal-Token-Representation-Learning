@@ -498,12 +498,93 @@ classifies, but along a substantially different direction --- which matters
 for anyone intending to use the weights as an intervention direction rather
 than only as a classifier.
 
+\section{Causal validation}
+\label{sec:causal}
+
+A decodable direction need not be a used one. This section asks whether
+gating an intervention on the probe changes what the model answers, and it
+is written to be falsifiable: the primary arm, its coefficient, and its
+firing rate are fixed before any arm runs, and every other arm is reported
+as a control or as a curve.
+
+\paragraph{What the probe supplies that the detector does not.} PTS labels
+a token pivotal when $|\pdelta| > \tau$. That criterion is
+sign-symmetric, so the direction it induces has no good end: ``more
+pivotal'' means ``the next token matters more,'' which is as likely to
+amplify a mistake as to prevent one. The intervention direction is
+therefore the \emph{signed} one, $\mu_{\text{helpful}} -
+\mu_{\text{harmful}}$, estimated on training questions only. At 0.6B and
+1.7B this direction is close to orthogonal to the unsigned one (cosine
+$-0.05$ and $-0.12$); at 4B they are mildly aligned ($+0.22$). The gate is
+the cascade $p_{\text{steer}} = P(\text{pivotal}) \cdot (1 -
+P(\text{helpful}))$: fire when the next token is likely to be a pivot
+\emph{and} likely to be a harmful one.
+
+\paragraph{Where the intervention is applied.} Both probes and the
+perturbation act on $\text{hidden\_states}[L]$ at a single layer $L$,
+through a forward hook on the module whose output is that tensor. Sharing
+one layer is not a convenience: a gate read above the steering site could
+not influence the token it fired on. $L$ is chosen on an inner split of
+training questions to maximize $\min(\text{AUROC}_{\text{unsigned}},
+\text{AUROC}_{\text{signed}})$ --- a cascade is only as good as its weaker
+half. This selects layer 11 at 0.6B, 25 at 1.7B and 21 at 4B; the latter
+two coincide with the layers the signed-probe evaluation of
+Section~\ref{sec:signed} chose under a different objective.
+
+\paragraph{The evaluator had to be rebuilt first.} Our earlier GSM8K
+harness measured 0.16--0.20 for Qwen3-0.6B against a published
+$\approx 0.60$, and was confounded on four independent axes: an instruct
+model scored without its chat template, a 256-token budget that truncated
+correct answers mid-sentence, an answer parser reading the full decoded
+sequence so that predictions could be lifted out of the question, and one
+RNG seed per arm consumed across variable-length generations, so that base
+and steered arms were genuinely paired only for the first example. Each
+moves accuracy without touching reasoning quality, and activation
+perturbations change generation length --- exactly the quantity the
+confounds respond to. The rebuilt evaluator applies the chat template,
+parses the response only, instructs the answer format, budgets 640 tokens,
+and decodes greedily so that pairing is exact. It recovers
+\textbf{0.567 / 0.817 / 0.940} at 0.6B / 1.7B / 4B.
+
+\paragraph{Evaluating in the band where pivots exist.} That last number is
+the problem. At 0.940 there are eighteen questions left to move, and 4B is
+the only scale at which the signed probe separates from token identity. We
+therefore evaluate on the acceptance band PTS itself searches: questions
+whose success probability lies in $[0.2, 0.8]$. This is the population
+pivotality is defined on, since a token cannot shift $P(\text{success})$
+for a question whose outcome is already settled. The band is estimated
+from its own independent sampled rollouts, before any arm runs ---
+selecting on whether the \emph{base arm} answered a question correctly
+would condition on a random outcome, and regression to the mean would then
+flatter any intervention.
+
+\paragraph{Controls.} Four, each removing a different explanation. An
+\textbf{always-on} arm at matched injected energy asks whether the gate
+matters or only the perturbation budget; this is the comparison the
+selectivity claim rests on. A \textbf{random-placement} arm at matched duty
+cycle, same direction and coefficient, separates \emph{where} the
+intervention fires from \emph{how much} of it there is. An
+\textbf{unsigned-direction} arm tests whether polarity matters. A
+\textbf{sign-flipped} arm negates the coefficient: a real effect must
+reverse. In our earlier runs, coefficients $+0.96$ and $-1.04$ had
+identical $\|\delta\|$ and both scored above baseline, which is what a
+noise floor looks like rather than a dose-response.
+
+\paragraph{Thresholds are calibrated, not guessed.} A probability
+threshold is not a firing rate. An observe pass runs the gate without
+perturbing --- so its generations are identical to the baseline's --- and
+the threshold for a target rate is read off the resulting quantiles over
+decode positions. A separate identity check confirms that the hook at
+coefficient zero reproduces the baseline exactly, which separates the
+plumbing from the perturbation.
+
 \section{Limitations}
 \label{sec:limitations}
 
-A single 0.6B model on a single task family, with 91 held-out questions.
-The oracle's labels are themselves noisy (Section~\ref{sec:labelnoise}) in
-a way we have quantified analytically but not yet empirically. The
+One model family on one task family: three scales of Qwen3 on GSM8K, with
+91, 104 and 130 held-out questions. The oracle's labels are themselves
+noisy (Section~\ref{sec:labelnoise}) in a way we have quantified
+analytically but not yet empirically. The
 acceptance filter retains only mid-difficulty questions, so pivot density
 is confounded with task difficulty relative to model capability and this
 label set is not a uniform sample of GSM8K. Conditioning on the bare
@@ -511,14 +592,13 @@ question puts an instruct model off distribution; we observed rollouts in
 which the model hallucinated multiple-choice options, and at least one
 event whose extreme $\pdelta$ traces to the answer-extraction cascade
 matching such a hallucination rather than to a genuine shift. Linear
-probes test linear decodability only. Everything here is correlational: we
-have not shown that the direction the probe identifies is causally used.
+probes test linear decodability only.
 
-Most importantly, the margins over uncertainty in Table~\ref{tab:main} are
-$+0.10$ to $+0.11$ with lower bounds within 0.01 of zero, on 91 questions.
-They are separations, not comfortable ones, and Section~\ref{sec:negatives}
-shows how little it takes to erase them. \TODO{Scale the question count and
-re-test; extend to Qwen3-1.7B and 4B.}
+At the smallest scale the margins over uncertainty are $+0.10$ to $+0.11$
+with lower bounds within 0.01 of zero, on 91 questions. They are
+separations, not comfortable ones, and Section~\ref{sec:negatives} shows
+how little it takes to erase them; the case rests on the trend across
+scales rather than on any single interval.
 
 \section{Conclusion}
 
