@@ -102,3 +102,78 @@ class TestOracle:
         ]
         table = math_answers_from_dataset(rows)
         assert table == {"p1": "7", "p2": r"\frac{3}{4}"}
+
+
+# ---------------------------------------------------------------------------
+# Divergence from upstream, documented rather than assumed
+# ---------------------------------------------------------------------------
+#
+# The house rule is to reimplement upstream behaviour and check it against
+# the clone. For GSM8K the goal is to match. For MATH it is deliberately
+# *not*, and these tests pin why, so nobody later "fixes" our oracle back
+# towards upstream's.
+
+
+def _upstream_math_oracle(answers):
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "pts"
+    if not (root / "pts" / "oracle.py").exists():
+        pytest.skip("upstream pts clone not present")
+    sys.path.insert(0, str(root))
+    try:
+        from pts.oracle import MathOracle as Upstream
+    except Exception as exc:                                   # pragma: no cover
+        pytest.skip(f"upstream not importable: {exc}")
+    return Upstream(answers=answers, dataset_format="math")
+
+
+class TestDivergenceFromUpstream:
+    """Upstream's MathOracle is unusable for MATH, in three separate ways."""
+
+    def test_upstream_cannot_separate_two_fractions(self) -> None:
+        """Upstream is wrong here whichever way it is configured.
+
+        The default regex ``\\boxed{([^}]+)}`` stops at the first closing
+        brace, so ``\\boxed{\\frac{1}{2}}`` extracts ``\\frac{1``. Without
+        math_verify the comparison then asks whether the extracted string is
+        contained in the expected one, and ``\\frac{1`` is contained in
+        ``\\frac{1}{2}`` -- so every fraction with the right numerator passes
+        regardless of denominator. With math_verify installed the truncated
+        expression fails to parse and *correct* answers are rejected instead.
+
+        Rather than pin one failure mode, assert the invariant that holds in
+        both: upstream cannot tell the right fraction from the wrong one.
+        """
+        gold = r"\frac{1}{2}"
+        up = _upstream_math_oracle({"Q": gold})
+        right = up.check_success("Q", r"\boxed{\frac{1}{2}}")
+        wrong = up.check_success("Q", r"\boxed{\frac{1}{3}}")
+        assert right == wrong, (
+            "upstream separated them; the extraction bug may be fixed "
+            f"(right={right}, wrong={wrong})"
+        )
+
+        ours = MathOracle({"Q": gold})
+        assert ours.check_success("Q", r"\boxed{\frac{1}{2}}") is True
+        assert ours.check_success("Q", r"\boxed{\frac{1}{3}}") is False
+
+    def test_ours_rejects_them(self) -> None:
+        """The same cases, without needing the clone."""
+        for resp, gold in [(r"\boxed{\frac{1}{3}}", r"\frac{1}{2}"),
+                           (r"\boxed{\frac{1}{99}}", r"\frac{1}{2}"),
+                           (r"\boxed{\frac{2}{3}}", r"\frac{2}{5}")]:
+            assert not MathOracle({"Q": gold}).check_success("Q", resp)
+        assert MathOracle({"Q": r"\frac{1}{2}"}).check_success("Q", r"\boxed{\frac{1}{2}}")
+
+    def test_upstream_takes_the_first_box_we_take_the_last(self) -> None:
+        up = _upstream_math_oracle({"Q": "4"})
+        assert up.check_success("Q", r"maybe \boxed{3}, actually \boxed{4}") is False
+        assert MathOracle({"Q": "4"}).check_success("Q", r"maybe \boxed{3}, actually \boxed{4}")
+
+    def test_upstream_falls_back_to_the_last_line(self) -> None:
+        """On MATH this rewards a model that never committed to an answer."""
+        up = _upstream_math_oracle({"Q": "5"})
+        assert up.check_success("Q", "we compute 2 + 3 and obtain 5") is True
+        assert MathOracle({"Q": "5"}).check_success("Q", "we compute 2 + 3 and obtain 5") is False
