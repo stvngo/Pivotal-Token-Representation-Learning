@@ -31,7 +31,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pts_harness.checkpoint import RunStore  # noqa: E402
-from pts_harness.oracle import GSM8KOracle, gsm8k_answers_from_dataset  # noqa: E402
+from pts_harness.oracle import (  # noqa: E402
+    GSM8KOracle, MathOracle, gsm8k_answers_from_dataset, math_answers_from_dataset,
+)
 from pts_harness.scheduler import QuerySpec, WaveScheduler  # noqa: E402
 from pts_harness.search import SearchConfig  # noqa: E402
 
@@ -45,6 +47,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dataset", default="openai/gsm8k")
     p.add_argument("--config", default="main")
     p.add_argument("--split", default="train")
+    p.add_argument("--task", default="gsm8k", choices=["gsm8k", "math"],
+                   help="which oracle and which field names. 'math' expects a "
+                        "'problem' field and a boxed answer, and scores a "
+                        "response with no \\boxed as a failure rather than "
+                        "falling back to the last number -- MATH solutions are "
+                        "full of intermediate quantities, so that fallback "
+                        "would reward models that never committed.")
+    p.add_argument("--question-key", default=None,
+                   help="override the field holding the question")
     p.add_argument("--out", default="runs/pts")
     p.add_argument("--session", default=None)
     p.add_argument("--backend", default="vllm", choices=["vllm", "hf"])
@@ -151,6 +162,12 @@ def start_hf_mirror(run_dir: str, repo_id: str, every: int):
         return None
 
 
+# Without this the model has no reason to emit \boxed at all, and the
+# oracle -- which deliberately has no fallback -- would score almost every
+# rollout a failure, collapsing the acceptance band to nothing.
+MATH_SUFFIX = "\n\nPut your final answer in \\boxed{}."
+
+
 def shard_of(uid: str, num_shards: int) -> int:
     if num_shards <= 1:
         return 0
@@ -161,25 +178,29 @@ def shard_of(uid: str, num_shards: int) -> int:
 def build_specs(args, tokenizer) -> tuple[list[QuerySpec], dict[str, str]]:
     from datasets import load_dataset
 
-    ds = load_dataset(args.dataset, args.config, split=args.split)
+    ds = (load_dataset(args.dataset, args.config, split=args.split)
+          if args.config else load_dataset(args.dataset, split=args.split))
     ds = ds.select(range(min(args.max_examples, len(ds))))
-    answers = gsm8k_answers_from_dataset(ds)
+    answers = (math_answers_from_dataset(ds) if args.task == "math"
+               else gsm8k_answers_from_dataset(ds))
+    qkey = args.question_key or ("problem" if args.task == "math" else "question")
 
     specs: list[QuerySpec] = []
     for i, row in enumerate(ds):
         uid = str(i)
         if shard_of(uid, args.num_shards) != args.shard:
             continue
-        question = row["question"]
+        question = row[qkey]
+        conditioned = question + (MATH_SUFFIX if args.task == "math" else "")
         if args.chat_template:
             text = tokenizer.apply_chat_template(
-                [{"role": "user", "content": question}],
+                [{"role": "user", "content": conditioned}],
                 tokenize=False,
                 add_generation_prompt=True,
                 enable_thinking=False,
             )
         else:
-            text = question
+            text = conditioned
         specs.append(
             QuerySpec(
                 uid=uid,
@@ -249,7 +270,7 @@ def main() -> None:
 
     print(f"[2/3] backend={args.backend} model={args.model}")
     backend = make_backend(args, tokenizer)
-    oracle = GSM8KOracle(answers)
+    oracle = MathOracle(answers) if args.task == "math" else GSM8KOracle(answers)
 
     run_cfg = vars(args) | {"search": cfg.__dict__}
     run_cfg.pop("hf_repo", None)          # not part of the run's identity
