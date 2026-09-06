@@ -109,7 +109,19 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
     norm_kept = []   # ||delta|| at perturbed, non-padding positions
     for i in range(0, len(prompts), batch_size):
         chunk = list(prompts[i:i + batch_size])
-        hook = CascadeSteeringHook(model, **hook_kwargs)
+        kw = dict(hook_kwargs)
+        if "pattern_rate" in kw:
+            # Rebuild per batch. The hook is constructed per batch and its
+            # step cursor restarts, so a pattern built once would fire at the
+            # identical step indices in every batch -- random within a
+            # sequence but perfectly correlated across them, which quietly
+            # reduces the control to far fewer independent draws than it
+            # appears to have.
+            kw["pattern"] = build_random_pattern(
+                max_new_tokens, batch_size, kw.pop("pattern_rate"),
+                seed=101 + i,
+            )
+        hook = CascadeSteeringHook(model, **kw)
         with hook:
             r, k = generate_batched(model, tok, chunk, greedy=greedy, seed=seed + i,
                                     max_new_tokens=max_new_tokens, batch_size=batch_size)
@@ -179,6 +191,9 @@ def main() -> None:
     ap.add_argument("--rate", type=float, default=0.05, help="primary fire rate")
     ap.add_argument("--alpha-grid", default="0.02,0.10")
     ap.add_argument("--rate-grid", default="0.02,0.10")
+    ap.add_argument("--n-random-dirs", type=int, default=3,
+                    help="independent random directions to average the "
+                         "random-direction control over")
     ap.add_argument("--hyst-grid", default="",
                     help="exploratory: hold the gate on for N extra positions "
                          "after a detection. A single-token nudge may be too "
@@ -227,8 +242,14 @@ def main() -> None:
 
     v_signed = npz["v_signed"]
     v_unsigned = npz["v_unsigned"]
+    # Several independent draws, not one. A single random vector has real
+    # variance, and this project has already been caught reporting one draw
+    # as if it were a null distribution (the AUROC control averaged eight
+    # vectors and then projected once, which is one sample, not eight).
     rng = np.random.default_rng(7)
-    v_random = rng.normal(size=v_signed.shape).astype(np.float32)
+    v_randoms = [rng.normal(size=v_signed.shape).astype(np.float32)
+                 for _ in range(a.n_random_dirs)]
+    v_random = v_randoms[0]
 
     base_kw = dict(layer=layer, gate_w=npz["gate_w"], gate_b=float(npz["gate_b"]),
                    sign_w=npz["sign_w"], sign_b=float(npz["sign_b"]),
@@ -337,17 +358,26 @@ def main() -> None:
             ("ablate_reactive", 0.0, MODE_REACTIVE, v_signed, {}),
             ("ablate_always_on", 0.0, MODE_ALWAYS_ON, v_signed, {}),
             ("ablate_random_placement", 0.0, MODE_PATTERN, v_signed, {}),
-            ("ablate_random_direction", 0.0, MODE_REACTIVE, v_random, {}),
+            *[(f"ablate_random_direction{'' if j == 0 else f'_{j}'}",
+               0.0, MODE_REACTIVE, vr, {}) for j, vr in enumerate(v_randoms)],
             ("ablate_unsigned_direction", 0.0, MODE_REACTIVE, v_unsigned, {}),
             ("amplify_reactive", 2.0, MODE_REACTIVE, v_signed, {}),
             ("amplify_always_on", 2.0, MODE_ALWAYS_ON, v_signed, {}),
+            # The always-on arms are ~20x the perturbation of the gated ones,
+            # and they order monotonically (ablate helps, amplify hurts). That
+            # ordering is only evidence about *this* direction if a random one
+            # does not reproduce it -- otherwise it just says scaling any
+            # component up hurts more than scaling it down.
+            ("ablate_always_on_random", 0.0, MODE_ALWAYS_ON, v_random, {}),
+            ("amplify_always_on_random", 2.0, MODE_ALWAYS_ON, v_random, {}),
+            ("ablate_always_on_unsigned", 0.0, MODE_ALWAYS_ON, v_unsigned, {}),
+            ("amplify_always_on_unsigned", 2.0, MODE_ALWAYS_ON, v_unsigned, {}),
         ]:
             kw = dict(base_kw, vector=vec, coef=coef, gate_mode=gm, **extra)
             if gm == MODE_REACTIVE:
                 kw["threshold"] = thresh(a.rate)
             elif gm == MODE_PATTERN:
-                kw["pattern"] = build_random_pattern(
-                    a.max_new_tokens, a.batch_size, a.rate)
+                kw["pattern_rate"] = a.rate
             arm, st = run(name=nm, hook_kwargs=kw)
             record(nm, arm, st, primary=(nm == "ablate_reactive"))
         _finish(a, results, t0, results["ablate_reactive"])
@@ -379,7 +409,7 @@ def main() -> None:
 
     arm, st = run(name="random_placement", hook_kwargs=dict(
         base_kw, vector=v_signed, coef=a.alpha, gate_mode=MODE_PATTERN,
-        pattern=build_random_pattern(a.max_new_tokens, a.batch_size, duty)))
+        pattern_rate=duty))
     record("random_placement_matched", arm, st)
 
     arm, st = run(name="flip", hook_kwargs=dict(
@@ -398,10 +428,11 @@ def main() -> None:
         gate_mode=MODE_REACTIVE, threshold=thresh(a.rate)))
     record("unsigned_direction", arm, st)
 
-    arm, st = run(name="random_dir", hook_kwargs=dict(
-        base_kw, vector=v_random, coef=a.alpha,
-        gate_mode=MODE_REACTIVE, threshold=thresh(a.rate)))
-    record("random_direction", arm, st)
+    for j, vr in enumerate(v_randoms):
+        arm, st = run(name=f"random_dir{j}", hook_kwargs=dict(
+            base_kw, vector=vr, coef=a.alpha,
+            gate_mode=MODE_REACTIVE, threshold=thresh(a.rate)))
+        record("random_direction" if j == 0 else f"random_direction_{j}", arm, st)
 
     # Gate on P(pivotal) alone: the cascade's signed half removed, so the
     # same direction fires on pivots regardless of whether they help.

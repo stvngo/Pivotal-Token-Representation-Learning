@@ -84,8 +84,9 @@ def pool(runs: list[dict]) -> dict:
             "duty_cycle_trimmed": sum(
                 r[k].get("duty_cycle_trimmed", 0) * wi for r, wi in zip(have, w)
             ) / max(sum(w), 1),
-            "energy": sum(r[k].get("energy_trimmed", r[k].get("energy", 0))
-                          for r in have),
+            "energy_trimmed": sum(
+                r[k].get("energy_trimmed", r[k].get("energy", 0)) for r in have
+            ),
             "primary": any(r[k].get("primary") for r in have),
             "vs_base": {"gained": g, "lost": lo, "net": g - lo,
                         "p": exact_mcnemar(g, lo)},
@@ -159,7 +160,7 @@ def main() -> None:
             print(f"  {label:<38} {arm['accuracy']:>6.3f} "
                   f"{arm['delta_acc']:>+7.3f} "
                   f"{arm.get('duty_cycle_trimmed', 0):>6.3f} "
-                  f"{arm.get('energy', 0):>8.0f} "
+                  f"{arm.get('energy_trimmed', arm.get('energy', 0)):>8.0f} "
                   f"{arm['vs_base']['net']:>+5d} "
                   f"{arm['vs_base']['p']:>6.3f}")
         dose = sorted(k for k in d if k.startswith("dose_"))

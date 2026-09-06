@@ -28,163 +28,13 @@
     "n": 64,
     "n_mismatched": 0
   },
-  "dose_alpha_0.02": {
-    "accuracy": 0.5654761904761905,
-    "n": 336,
-    "n_correct": 190,
-    "delta_acc": -0.014880952380952439,
-    "duty_cycle_trimmed": 0.05011767216036785,
-    "energy": 10975.954375000001,
-    "primary": false,
-    "vs_base": {
-      "gained": 21,
-      "lost": 26,
-      "net": -5,
-      "p": 0.5600646295802107
-    }
-  },
-  "unsigned_direction": {
-    "accuracy": 0.5803571428571429,
-    "n": 336,
-    "n_correct": 195,
-    "delta_acc": 0.0,
-    "duty_cycle_trimmed": 0.048928829454939066,
-    "energy": 25966.9296875,
-    "primary": false,
-    "vs_base": {
-      "gained": 25,
-      "lost": 25,
-      "net": 0,
-      "p": 1.0
-    }
-  },
-  "dose_rate_0.02": {
-    "accuracy": 0.5595238095238095,
-    "n": 336,
-    "n_correct": 188,
-    "delta_acc": -0.02083333333333337,
-    "duty_cycle_trimmed": 0.019836003302468222,
-    "energy": 15256.055078125,
-    "primary": false,
-    "vs_base": {
-      "gained": 17,
-      "lost": 24,
-      "net": -7,
-      "p": 0.34888887944907765
-    }
-  },
-  "sign_flipped": {
-    "accuracy": 0.5892857142857143,
-    "n": 336,
-    "n_correct": 198,
-    "delta_acc": 0.008928571428571397,
-    "duty_cycle_trimmed": 0.04960339882002892,
-    "energy": 26276.767968750002,
-    "primary": false,
-    "vs_base": {
-      "gained": 22,
-      "lost": 19,
-      "net": 3,
-      "p": 0.755228657504631
-    }
-  },
-  "random_direction": {
-    "accuracy": 0.5803571428571429,
-    "n": 336,
-    "n_correct": 195,
-    "delta_acc": 0.0,
-    "duty_cycle_trimmed": 0.049905553094152864,
-    "energy": 26936.925000000003,
-    "primary": false,
-    "vs_base": {
-      "gained": 26,
-      "lost": 26,
-      "net": 0,
-      "p": 1.0
-    }
-  },
-  "unsigned_gate": {
-    "accuracy": 0.5684523809523809,
-    "n": 336,
-    "n_correct": 191,
-    "delta_acc": -0.011904761904761973,
-    "duty_cycle_trimmed": 0.049610849116967795,
-    "energy": 26354.203125,
-    "primary": false,
-    "vs_base": {
-      "gained": 21,
-      "lost": 25,
-      "net": -4,
-      "p": 0.6587380770236564
-    }
-  },
-  "dose_hysteresis_4": {
-    "accuracy": 0.5595238095238095,
-    "n": 336,
-    "n_correct": 188,
-    "delta_acc": -0.02083333333333337,
-    "duty_cycle_trimmed": 0.16178525867037563,
-    "energy": 70485.6796875,
-    "primary": false,
-    "vs_base": {
-      "gained": 27,
-      "lost": 34,
-      "net": -7,
-      "p": 0.4426260049464714
-    }
-  },
-  "always_on_matched_energy": {
-    "accuracy": 0.5833333333333334,
-    "n": 336,
-    "n_correct": 196,
-    "delta_acc": 0.0029761904761904656,
-    "duty_cycle_trimmed": 1.0,
-    "energy": 26947.765609410126,
-    "primary": false,
-    "vs_base": {
-      "gained": 25,
-      "lost": 24,
-      "net": 1,
-      "p": 1.0
-    }
-  },
-  "dose_alpha_0.1": {
-    "accuracy": 0.5892857142857143,
-    "n": 336,
-    "n_correct": 198,
-    "delta_acc": 0.008928571428571397,
-    "duty_cycle_trimmed": 0.05257944067680689,
-    "energy": 58507.225000000006,
-    "primary": false,
-    "vs_base": {
-      "gained": 30,
-      "lost": 27,
-      "net": 3,
-      "p": 0.7913664277791806
-    }
-  },
-  "dose_rate_0.1": {
-    "accuracy": 0.5416666666666666,
-    "n": 336,
-    "n_correct": 182,
-    "delta_acc": -0.038690476190476275,
-    "duty_cycle_trimmed": 0.10185548317226126,
-    "energy": 47815.75000000001,
-    "primary": false,
-    "vs_base": {
-      "gained": 18,
-      "lost": 31,
-      "net": -13,
-      "p": 0.08543313315739454
-    }
-  },
   "dose_alpha_0.2": {
     "accuracy": 0.5714285714285714,
     "n": 336,
     "n_correct": 192,
     "delta_acc": -0.008928571428571508,
     "duty_cycle_trimmed": 0.0552501061642121,
-    "energy": 115203.52500000001,
+    "energy_trimmed": 115203.52500000001,
     "primary": false,
     "vs_base": {
       "gained": 38,
@@ -199,7 +49,7 @@
     "n_correct": 191,
     "delta_acc": -0.011904761904761973,
     "duty_cycle_trimmed": 0.05313999312146018,
-    "energy": 21539.030078125,
+    "energy_trimmed": 21539.030078125,
     "primary": false,
     "vs_base": {
       "gained": 26,
@@ -208,19 +58,169 @@
       "p": 0.6888797607233396
     }
   },
+  "dose_alpha_0.02": {
+    "accuracy": 0.5654761904761905,
+    "n": 336,
+    "n_correct": 190,
+    "delta_acc": -0.014880952380952439,
+    "duty_cycle_trimmed": 0.05011767216036785,
+    "energy_trimmed": 10975.954375000001,
+    "primary": false,
+    "vs_base": {
+      "gained": 21,
+      "lost": 26,
+      "net": -5,
+      "p": 0.5600646295802107
+    }
+  },
+  "dose_rate_0.02": {
+    "accuracy": 0.5595238095238095,
+    "n": 336,
+    "n_correct": 188,
+    "delta_acc": -0.02083333333333337,
+    "duty_cycle_trimmed": 0.019836003302468222,
+    "energy_trimmed": 15256.055078125,
+    "primary": false,
+    "vs_base": {
+      "gained": 17,
+      "lost": 24,
+      "net": -7,
+      "p": 0.34888887944907765
+    }
+  },
   "reactive": {
     "accuracy": 0.5654761904761905,
     "n": 336,
     "n_correct": 190,
     "delta_acc": -0.014880952380952439,
     "duty_cycle_trimmed": 0.05101614081197127,
-    "energy": 28077.90625,
+    "energy_trimmed": 28077.90625,
     "primary": true,
     "vs_base": {
       "gained": 20,
       "lost": 25,
       "net": -5,
       "p": 0.5514843298025198
+    }
+  },
+  "dose_rate_0.1": {
+    "accuracy": 0.5416666666666666,
+    "n": 336,
+    "n_correct": 182,
+    "delta_acc": -0.038690476190476275,
+    "duty_cycle_trimmed": 0.10185548317226126,
+    "energy_trimmed": 47815.75000000001,
+    "primary": false,
+    "vs_base": {
+      "gained": 18,
+      "lost": 31,
+      "net": -13,
+      "p": 0.08543313315739454
+    }
+  },
+  "unsigned_gate": {
+    "accuracy": 0.5684523809523809,
+    "n": 336,
+    "n_correct": 191,
+    "delta_acc": -0.011904761904761973,
+    "duty_cycle_trimmed": 0.049610849116967795,
+    "energy_trimmed": 26354.203125,
+    "primary": false,
+    "vs_base": {
+      "gained": 21,
+      "lost": 25,
+      "net": -4,
+      "p": 0.6587380770236564
+    }
+  },
+  "always_on_matched_energy": {
+    "accuracy": 0.5833333333333334,
+    "n": 336,
+    "n_correct": 196,
+    "delta_acc": 0.0029761904761904656,
+    "duty_cycle_trimmed": 1.0,
+    "energy_trimmed": 26947.765609410126,
+    "primary": false,
+    "vs_base": {
+      "gained": 25,
+      "lost": 24,
+      "net": 1,
+      "p": 1.0
+    }
+  },
+  "sign_flipped": {
+    "accuracy": 0.5892857142857143,
+    "n": 336,
+    "n_correct": 198,
+    "delta_acc": 0.008928571428571397,
+    "duty_cycle_trimmed": 0.04960339882002892,
+    "energy_trimmed": 26276.767968750002,
+    "primary": false,
+    "vs_base": {
+      "gained": 22,
+      "lost": 19,
+      "net": 3,
+      "p": 0.755228657504631
+    }
+  },
+  "dose_alpha_0.1": {
+    "accuracy": 0.5892857142857143,
+    "n": 336,
+    "n_correct": 198,
+    "delta_acc": 0.008928571428571397,
+    "duty_cycle_trimmed": 0.05257944067680689,
+    "energy_trimmed": 58507.225000000006,
+    "primary": false,
+    "vs_base": {
+      "gained": 30,
+      "lost": 27,
+      "net": 3,
+      "p": 0.7913664277791806
+    }
+  },
+  "dose_hysteresis_4": {
+    "accuracy": 0.5595238095238095,
+    "n": 336,
+    "n_correct": 188,
+    "delta_acc": -0.02083333333333337,
+    "duty_cycle_trimmed": 0.16178525867037563,
+    "energy_trimmed": 70485.6796875,
+    "primary": false,
+    "vs_base": {
+      "gained": 27,
+      "lost": 34,
+      "net": -7,
+      "p": 0.4426260049464714
+    }
+  },
+  "random_direction": {
+    "accuracy": 0.5803571428571429,
+    "n": 336,
+    "n_correct": 195,
+    "delta_acc": 0.0,
+    "duty_cycle_trimmed": 0.049905553094152864,
+    "energy_trimmed": 26936.925000000003,
+    "primary": false,
+    "vs_base": {
+      "gained": 26,
+      "lost": 26,
+      "net": 0,
+      "p": 1.0
+    }
+  },
+  "unsigned_direction": {
+    "accuracy": 0.5803571428571429,
+    "n": 336,
+    "n_correct": 195,
+    "delta_acc": 0.0,
+    "duty_cycle_trimmed": 0.048928829454939066,
+    "energy_trimmed": 25966.9296875,
+    "primary": false,
+    "vs_base": {
+      "gained": 25,
+      "lost": 25,
+      "net": 0,
+      "p": 1.0
     }
   }
 }
