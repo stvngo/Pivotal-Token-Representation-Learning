@@ -87,15 +87,19 @@ def start(session: str, script: str, args: list[str], *, sync: bool) -> None:
     payload = local.read_text()
     argstr = " ".join(shlex.quote(a) for a in args)
 
+    # Build the shell command first and embed it as a *repr*. Interpolating
+    # argstr straight into a double-quoted string literal in the generated
+    # code breaks the moment an argument contains a double quote -- a JSON
+    # spec, say -- and the failure is silent: the generated source raises a
+    # SyntaxError on the VM and colab_exec simply returns nothing.
+    cmd = (f"cd {REMOTE_ROOT} && nohup python -u {remote} {argstr} "
+           f"> {LOG} 2>&1 & echo $! > {PIDFILE}")
     code = f"""
-import os, subprocess, textwrap
+import os, subprocess
 os.makedirs({REMOTE_ROOT!r}, exist_ok=True)
 open({remote!r}, "w").write({payload!r})
 # start_new_session so the process survives this kernel call returning
-p = subprocess.Popen(
-    "cd {REMOTE_ROOT} && nohup python -u {remote} {argstr} > {LOG} 2>&1 & echo $! > {PIDFILE}",
-    shell=True, start_new_session=True,
-)
+p = subprocess.Popen({cmd!r}, shell=True, start_new_session=True)
 p.wait()
 print("started pid", open({PIDFILE!r}).read().strip())
 """
