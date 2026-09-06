@@ -51,8 +51,8 @@ the model's probability of reaching a correct answer past a threshold,
 estimated by sampling many rollouts and adjudicating each with an oracle.
 We ask whether that expensive, outcome-grounded property is already
 present in the residual stream \emph{one position before} the token is
-emitted --- the only position at which a prediction could still gate an
-intervention. Generating PTS events for three Qwen3 models at scale over 3{,}000
+emitted --- the only position at which a prediction could still support an
+intervention. Generating PTS events for three Qwen3 models over 3{,}000
 GSM8K questions each, we find pivotality is linearly decodable at $t{-}1$
 at every scale (AUROC $0.807$--$0.897$), above token identity and
 every next-token uncertainty statistic (entropy, top-2 margin, top-1 probability), 
@@ -62,11 +62,13 @@ probe AUROC rises with model size while entropy stays flat,
 so the advantage over predictive uncertainty widens
 from $+0.112$ to $+0.204$. The \emph{sign} of the impending shift,
 whether the next token will help or hurt the success probability, is decodable too, 
-but only at scale: a clean null at 0.6B becoming $0.780$ AUROC at 4B, separated from
-token identity, from uncertainty (which is sign-blind by construction),
-and from a random direction. Additionally, we perform causal intervention across four families, 
-three scales and 128 steered arms, finding that steering does not change GSM8K accuracy, and that no
-configuration separates from a matched control firing at random positions
+but only in the larger models. At 0.6B the signed probe is
+indistinguishable from a random direction; at 4B it reaches $0.780$
+AUROC, clearing token identity, next-token uncertainty, and a random
+direction alike. Uncertainty cannot account for this, because entropy is
+blind to sign by construction. Additionally, we perform causal intervention across four families, 
+three scales and 128 steered arms, finding that steering does not measurably change GSM8K accuracy, 
+and that no configuration separates from a matched control firing at random positions
 or steering along a random direction.
 \end{abstract}
 
