@@ -229,6 +229,16 @@ class MathOracle:
 
     def __init__(self, answers: Mapping[str, str]) -> None:
         self.answers = dict(answers)
+        # Because there is no fallback, a model that does not emit \boxed
+        # scores zero on every rollout, the filter band collapses, and the
+        # search quietly finds nothing. That failure looks identical to "this
+        # model is bad at MATH", so the rate is counted rather than assumed.
+        self.n_scored = 0
+        self.n_parsed = 0
+
+    @property
+    def parse_rate(self) -> float:
+        return self.n_parsed / self.n_scored if self.n_scored else 0.0
 
     def __call__(self, query: str, response: str) -> bool:
         return self.check_success(query, response)
@@ -237,7 +247,10 @@ class MathOracle:
         expected = self.answers.get(query)
         if expected is None:
             return False
-        return math_answers_match(extract_boxed(response), expected)
+        got = extract_boxed(response)
+        self.n_scored += 1
+        self.n_parsed += got is not None
+        return math_answers_match(got, expected)
 
 
 def math_answers_from_dataset(rows) -> dict[str, str]:

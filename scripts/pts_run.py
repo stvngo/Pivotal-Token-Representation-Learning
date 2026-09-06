@@ -318,6 +318,14 @@ def main() -> None:
         summary.rollouts * args.max_new_tokens / elapsed if elapsed else 0.0
     )
     out["events_path"] = str(events_path)
+    if hasattr(oracle, "parse_rate"):
+        # The single number that says whether a MATH run is meaningful.
+        out["oracle_parse_rate"] = oracle.parse_rate
+        out["oracle_rollouts_scored"] = oracle.n_scored
+        if oracle.n_scored and oracle.parse_rate < 0.5:
+            print(f"\n[warn] only {oracle.parse_rate:.1%} of rollouts produced a "
+                  f"parseable answer; the acceptance band is probably starved "
+                  f"and these events should not be trusted", flush=True)
 
     (Path(args.out) / "summary.json").write_text(json.dumps(out, indent=2, default=str))
     print("\n" + json.dumps(out, indent=2, default=str))
