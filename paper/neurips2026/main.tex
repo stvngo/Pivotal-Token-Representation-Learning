@@ -207,54 +207,6 @@ data we generate this problem does not arise. For the released datasets,
 which predate the position field, we verify each recovered index against
 the reported token id and discard rows that fail.
 
-\subsection{Label noise in the oracle}
-\label{sec:labelnoise}
-
-$\widehat{\pdelta}$ is a difference of two binomial estimates from $S$
-rollouts each, accepted when $|\widehat{\pdelta}| \ge \tau$. Under the null
-of no true change $\mathrm{Var}(\widehat{\pdelta}) = 2p(1-p)/S$, so at the
-reference setting $S{=}50$, $\tau{=}0.2$ the acceptance threshold sits at
-only $2\sigma$: a false-acceptance rate near 4.6\% per tested position at
-$p{=}0.5$. We therefore store the raw counts
-$(n_{\text{before}}, s_{\text{before}}, n_{\text{after}}, s_{\text{after}})$
-rather than a verdict, which makes $\tau$ a post-hoc knob and lets every
-event carry a Wilson interval.
-
-That storage decision lets us replace the analytical bound with a
-measurement, at no GPU cost: re-test every accepted event with a
-two-proportion $z$-test of $H_0: p_{\text{after}} = p_{\text{before}}$.
-
-\begin{center}
-\begin{tabular}{lrrrrr}
-\toprule
-model & events & \multicolumn{2}{c}{not rejected} & \multicolumn{2}{c}{probe AUROC} \\
- & & at 0.05 & at 0.01 & all labels & $\alpha \le 0.01$ \\
-\midrule
-Qwen3-0.6B & 688 & 5.2\% & 23.7\% & 0.798 & 0.826 \\
-Qwen3-1.7B & 835 & 1.3\% & 11.3\% & 0.869 & 0.889 \\
-Qwen3-4B   & 936 & 2.6\% & 14.9\% & 0.922 & 0.937 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\textbf{The accepted events are far cleaner than the per-position bound
-suggests} --- 1--5\% fail to reject at 0.05, against the $\approx 4.6\%$
-false-acceptance rate the bound gives \emph{per tested position}. The two
-numbers are not in conflict; they count different things. The bound
-describes how often a position with no true effect is wrongly accepted,
-but bisection does not test positions at random. It recursively narrows on
-the interval where the probability actually moved, so the positions that
-reach an acceptance test are enriched for real shifts, and the accepted
-set is not a sample of the null. Mean $|\pdelta|$ among accepted events is
-0.43--0.48 against $\tau{=}0.2$: most are far from the threshold rather
-than marginal.
-
-Restricting to events surviving $\alpha \le 0.01$ raises probe AUROC by
-$+0.028$, $+0.020$ and $+0.015$. Consistent in direction at all three
-scales and small in size, which is the honest summary: some of the gap
-between the probe and a perfect classifier is the oracle's noise rather
-than the probe's failure, but not much of it.
-
 \subsection{Probes, baselines, and how they are compared}
 \label{sec:probes}
 
@@ -379,68 +331,6 @@ The margin over \emph{token identity} does not show the same trend
 scale (0.696 $\to$ 0.715 $\to$ 0.791), so probe and lookup table improve
 together. The widening is uncertainty-specific.
 
-\subsection{Where the negatives come from decides the comparison}
-\label{sec:negatives}
-
-That comparison depends on a choice which is easy to leave implicit. Our
-rollouts run to the token limit, and the natural thing is to sample
-non-pivotal positions uniformly across the stored sequence. Doing so draws
-most of them from the fluent tail, \emph{after} the model has committed to
-an answer: on Qwen3-0.6B, 63\% of negatives landed beyond the last pivot,
-with mean next-token entropy 0.275 against 0.476 before it, and median
-position 232 against 146 for pivots.
-
-Under that sampling entropy rises from 0.693 to 0.814 and the probe's
-advantage over it falls to $+0.039$ with an interval spanning zero --- a
-null result manufactured entirely by the negative distribution. We
-therefore restrict negatives to the span in which pivots occur, and we
-recommend that any comparison of this kind state where its negatives came
-from. Published PTS datasets avoid the problem incidentally, because the
-sequence they store stops at the deepest pivot; it appears as soon as one
-keeps the full rollout, which is otherwise the more useful artifact.
-
-\subsection{Reading at the pivot instead of before it}
-\label{sec:at-t}
-
-Moving the label from $t-1$ to the pivot itself gives a post-hoc
-classifier: informative, but unable to gate anything.
-
-\begin{table}[t]
-  \centering
-  \caption{Probe read at $t-1$ versus at the pivotal token $t$, same data
-  and same negatives. Entropy inverts to chance or below at all three
-  scales.}
-  \label{tab:at-t}
-  \begin{tabular}{lcccccc}
-    \toprule
-    & \multicolumn{2}{c}{Qwen3-0.6B} & \multicolumn{2}{c}{Qwen3-1.7B} & \multicolumn{2}{c}{Qwen3-4B} \\
-    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
-    Detector & $t{-}1$ & $t$ & $t{-}1$ & $t$ & $t{-}1$ & $t$ \\
-    \midrule
-    Linear probe & 0.807 & 0.868 & 0.863 & 0.913 & 0.897 & 0.945 \\
-    Mean-difference (CAA) & 0.774 & 0.810 & 0.841 & 0.895 & 0.868 & 0.878 \\
-    Token identity (freq.) & 0.696 & 0.786 & 0.688 & 0.875 & 0.785 & 0.868 \\
-    \textbf{Next-token entropy} & \textbf{0.693} & \textbf{0.449} & \textbf{0.721} & \textbf{0.475} & \textbf{0.694} & \textbf{0.495} \\
-    Neg.\ top-2 margin & 0.699 & 0.445 & 0.703 & 0.454 & 0.703 & 0.494 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-The probe and token identity both rise, which is unsurprising: at $t$ the
-token occupying the labelled position \emph{is} the pivot. The informative
-change is entropy, which inverts from $\approx 0.70$ to $\approx 0.47$ at
-all three scales. Uncertainty is elevated immediately before a pivotal
-token and suppressed immediately after it --- what a decision point being
-resolved should look like. The two positions carry opposite uncertainty
-signatures rather than differing in degree, and this supplies an argument
-for the $t-1$ framing that does not depend on the intervention story:
-$t-1$ is where the uncertainty signal lives.
-
-We do not report the $t$ column as a headline. Its null is noisier --- a
-random direction reaches 0.55--0.68 there against 0.43--0.55 at $t-1$,
-because the classes are more separable overall, so a single random
-projection picks up more of that separation by chance.
-
 \subsection{The sign of the impending shift is decodable, at scale}
 \label{sec:signed}
 
@@ -532,53 +422,6 @@ statement is that a judgment which costs a fifth of a million generated
 tokens to make exactly can be approximated, imperfectly, for free during
 decoding --- which is what makes gating an intervention on it conceivable
 at all.
-
-\subsection{What the classes look like}
-\label{sec:embeddings}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/embed_qwen3-4b.pdf}
-\caption{Qwen3-4B test activations at the steering layer (21), projected to
-two dimensions by PCA (left) and t-SNE (right). Three classes: a
-non-pivotal position, and positions preceding a helpful or a harmful pivot.
-\textbf{The classes do not separate visibly}, and the first two principal
-components carry only 5.8\% and 4.0\% of the variance. This is not in
-tension with a probe reading 0.922 AUROC on the same rows --- the
-discriminative direction is one of 2560 and need not be a high-variance
-one. We include the figure because the opposite impression, that a working
-linear probe implies visible clustering, is common; the corresponding
-figures for 0.6B and 1.7B are in the appendix and look the same.}
-\label{fig:embed}
-\end{figure}
-
-\subsection{No layer is special, and selection inflates the headline}
-\label{sec:layers}
-
-On Qwen3-0.6B, per-layer accuracy spans 0.651--0.741 with mean 0.702.
-Simulating a null in which all 29 layers are equally informative, each
-measured on 232 rows, gives an expected maximum of 0.762 against an
-observed 0.741. There is no evidence of layer specialization; the signal is
-spread across the mid-to-late stack, and naming a single ``pivotal layer''
-would be an artifact of maximizing over correlated noise. Consistently, the
-selected layer sits at 76--79\% of depth in all three models
-($L{=}22/29$, $23/29$, $24/37$) without any of them being distinguishable
-from its neighbours.
-
-The cost of getting the protocol wrong is measurable. Choosing the layer on
-training data and reporting on test gives 0.807; taking the best layer on
-the reporting split gives 0.814. Under a leakier protocol we measured the
-same gap at 0.063 --- large enough to manufacture a result.
-
-\subsection{Regularization}
-\label{sec:reg}
-
-On Qwen3-0.6B, AUROC moves from 0.752 at $C{=}1$ to 0.816 at $C{=}10^{-3}$,
-and the probe direction rotates toward the mean-difference direction as the
-penalty tightens (cosine 0.173 to 0.765). A weakly regularized probe still
-classifies, but along a substantially different direction --- which matters
-for anyone intending to use the weights as an intervention direction rather
-than only as a classifier.
 
 \section{Causal validation}
 \label{sec:causal}
@@ -883,9 +726,11 @@ controls are unambiguous, not because we think the question is settled.
 \label{sec:limitations}
 
 One model family on one task family: three scales of Qwen3 on GSM8K, with
-91, 104 and 130 held-out questions. The oracle's labels are themselves
-noisy (Section~\ref{sec:labelnoise}) in a way we have quantified
-analytically but not yet empirically. The
+91, 104 and 130 held-out questions. The oracle's labels carry measurable
+noise, though less than the analytical bound suggests
+(Section~\ref{sec:labelnoise}): 1--5\% of accepted events fail a
+two-proportion test at 0.05, and restricting to the confident subset moves
+probe AUROC by $+0.015$ to $+0.028$. The
 acceptance filter retains only mid-difficulty questions, so pivot density
 is confounded with task difficulty relative to model capability and this
 label set is not a uniform sample of GSM8K. Conditioning on the bare
@@ -948,6 +793,173 @@ leaving it to be inferred.
 \bibliography{references}
 
 \appendix
+
+\section{Supporting analyses}
+
+The sections that follow are methodology and diagnostics rather than
+results: the corrections that produced the numbers in the main text, the
+robustness checks that constrain how far they generalise, and two negative
+findings about our own procedure. None of them is a claim about pivotality;
+each is a reason to believe or disbelieve one.
+
+\section{Label noise in the oracle}
+\label{sec:labelnoise}
+
+$\widehat{\pdelta}$ is a difference of two binomial estimates from $S$
+rollouts each, accepted when $|\widehat{\pdelta}| \ge \tau$. Under the null
+of no true change $\mathrm{Var}(\widehat{\pdelta}) = 2p(1-p)/S$, so at the
+reference setting $S{=}50$, $\tau{=}0.2$ the acceptance threshold sits at
+only $2\sigma$: a false-acceptance rate near 4.6\% per tested position at
+$p{=}0.5$. We therefore store the raw counts
+$(n_{\text{before}}, s_{\text{before}}, n_{\text{after}}, s_{\text{after}})$
+rather than a verdict, which makes $\tau$ a post-hoc knob and lets every
+event carry a Wilson interval.
+
+That storage decision lets us replace the analytical bound with a
+measurement, at no GPU cost: re-test every accepted event with a
+two-proportion $z$-test of $H_0: p_{\text{after}} = p_{\text{before}}$.
+
+\begin{center}
+\begin{tabular}{lrrrrr}
+\toprule
+model & events & \multicolumn{2}{c}{not rejected} & \multicolumn{2}{c}{probe AUROC} \\
+ & & at 0.05 & at 0.01 & all labels & $\alpha \le 0.01$ \\
+\midrule
+Qwen3-0.6B & 688 & 5.2\% & 23.7\% & 0.798 & 0.826 \\
+Qwen3-1.7B & 835 & 1.3\% & 11.3\% & 0.869 & 0.889 \\
+Qwen3-4B   & 936 & 2.6\% & 14.9\% & 0.922 & 0.937 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{The accepted events are far cleaner than the per-position bound
+suggests} --- 1--5\% fail to reject at 0.05, against the $\approx 4.6\%$
+false-acceptance rate the bound gives \emph{per tested position}. The two
+numbers are not in conflict; they count different things. The bound
+describes how often a position with no true effect is wrongly accepted,
+but bisection does not test positions at random. It recursively narrows on
+the interval where the probability actually moved, so the positions that
+reach an acceptance test are enriched for real shifts, and the accepted
+set is not a sample of the null. Mean $|\pdelta|$ among accepted events is
+0.43--0.48 against $\tau{=}0.2$: most are far from the threshold rather
+than marginal.
+
+Restricting to events surviving $\alpha \le 0.01$ raises probe AUROC by
+$+0.028$, $+0.020$ and $+0.015$. Consistent in direction at all three
+scales and small in size, which is the honest summary: some of the gap
+between the probe and a perfect classifier is the oracle's noise rather
+than the probe's failure, but not much of it.
+
+\section{Where the negatives come from decides the comparison}
+\label{sec:negatives}
+
+That comparison depends on a choice which is easy to leave implicit. Our
+rollouts run to the token limit, and the natural thing is to sample
+non-pivotal positions uniformly across the stored sequence. Doing so draws
+most of them from the fluent tail, \emph{after} the model has committed to
+an answer: on Qwen3-0.6B, 63\% of negatives landed beyond the last pivot,
+with mean next-token entropy 0.275 against 0.476 before it, and median
+position 232 against 146 for pivots.
+
+Under that sampling entropy rises from 0.693 to 0.814 and the probe's
+advantage over it falls to $+0.039$ with an interval spanning zero --- a
+null result manufactured entirely by the negative distribution. We
+therefore restrict negatives to the span in which pivots occur, and we
+recommend that any comparison of this kind state where its negatives came
+from. Published PTS datasets avoid the problem incidentally, because the
+sequence they store stops at the deepest pivot; it appears as soon as one
+keeps the full rollout, which is otherwise the more useful artifact.
+
+\section{Reading at the pivot instead of before it}
+\label{sec:at-t}
+
+Moving the label from $t-1$ to the pivot itself gives a post-hoc
+classifier: informative, but unable to gate anything.
+
+\begin{table}[t]
+  \centering
+  \caption{Probe read at $t-1$ versus at the pivotal token $t$, same data
+  and same negatives. Entropy inverts to chance or below at all three
+  scales.}
+  \label{tab:at-t}
+  \begin{tabular}{lcccccc}
+    \toprule
+    & \multicolumn{2}{c}{Qwen3-0.6B} & \multicolumn{2}{c}{Qwen3-1.7B} & \multicolumn{2}{c}{Qwen3-4B} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    Detector & $t{-}1$ & $t$ & $t{-}1$ & $t$ & $t{-}1$ & $t$ \\
+    \midrule
+    Linear probe & 0.807 & 0.868 & 0.863 & 0.913 & 0.897 & 0.945 \\
+    Mean-difference (CAA) & 0.774 & 0.810 & 0.841 & 0.895 & 0.868 & 0.878 \\
+    Token identity (freq.) & 0.696 & 0.786 & 0.688 & 0.875 & 0.785 & 0.868 \\
+    \textbf{Next-token entropy} & \textbf{0.693} & \textbf{0.449} & \textbf{0.721} & \textbf{0.475} & \textbf{0.694} & \textbf{0.495} \\
+    Neg.\ top-2 margin & 0.699 & 0.445 & 0.703 & 0.454 & 0.703 & 0.494 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The probe and token identity both rise, which is unsurprising: at $t$ the
+token occupying the labelled position \emph{is} the pivot. The informative
+change is entropy, which inverts from $\approx 0.70$ to $\approx 0.47$ at
+all three scales. Uncertainty is elevated immediately before a pivotal
+token and suppressed immediately after it --- what a decision point being
+resolved should look like. The two positions carry opposite uncertainty
+signatures rather than differing in degree, and this supplies an argument
+for the $t-1$ framing that does not depend on the intervention story:
+$t-1$ is where the uncertainty signal lives.
+
+We do not report the $t$ column as a headline. Its null is noisier --- a
+random direction reaches 0.55--0.68 there against 0.43--0.55 at $t-1$,
+because the classes are more separable overall, so a single random
+projection picks up more of that separation by chance.
+
+\section{What the classes look like}
+\label{sec:embeddings}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/embed_qwen3-4b.pdf}
+\caption{Qwen3-4B test activations at the steering layer (21), projected to
+two dimensions by PCA (left) and t-SNE (right). Three classes: a
+non-pivotal position, and positions preceding a helpful or a harmful pivot.
+\textbf{The classes do not separate visibly}, and the first two principal
+components carry only 5.8\% and 4.0\% of the variance. This is not in
+tension with a probe reading 0.922 AUROC on the same rows --- the
+discriminative direction is one of 2560 and need not be a high-variance
+one. We include the figure because the opposite impression, that a working
+linear probe implies visible clustering, is common; the corresponding
+figures for 0.6B and 1.7B are in the appendix and look the same.}
+\label{fig:embed}
+\end{figure}
+
+\section{No layer is special, and selection inflates the headline}
+\label{sec:layers}
+
+On Qwen3-0.6B, per-layer accuracy spans 0.651--0.741 with mean 0.702.
+Simulating a null in which all 29 layers are equally informative, each
+measured on 232 rows, gives an expected maximum of 0.762 against an
+observed 0.741. There is no evidence of layer specialization; the signal is
+spread across the mid-to-late stack, and naming a single ``pivotal layer''
+would be an artifact of maximizing over correlated noise. Consistently, the
+selected layer sits at 76--79\% of depth in all three models
+($L{=}22/29$, $23/29$, $24/37$) without any of them being distinguishable
+from its neighbours.
+
+The cost of getting the protocol wrong is measurable. Choosing the layer on
+training data and reporting on test gives 0.807; taking the best layer on
+the reporting split gives 0.814. Under a leakier protocol we measured the
+same gap at 0.063 --- large enough to manufacture a result.
+
+\section{Regularization}
+\label{sec:reg}
+
+On Qwen3-0.6B, AUROC moves from 0.752 at $C{=}1$ to 0.816 at $C{=}10^{-3}$,
+and the probe direction rotates toward the mean-difference direction as the
+penalty tightens (cosine 0.173 to 0.765). A weakly regularized probe still
+classifies, but along a substantially different direction --- which matters
+for anyone intending to use the weights as an intervention direction rather
+than only as a classifier.
+
+
 \section{Reproduction}
 
 Events: \texttt{stvngo/Qwen3-0.6B-pts-tokens}. Activations:
