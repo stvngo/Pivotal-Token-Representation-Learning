@@ -172,7 +172,7 @@ def _export(a, tr, pick, rows, y_uns, y_sgn) -> None:
     )
 
     meta = {
-        "tag": a.tag, "acts": str(acts), "layer": L,
+        "tag": a.tag, "acts": str(a.acts), "layer": L,
         "C_unsigned": pick["C_unsigned"], "C_signed": pick["C_signed"],
         "inner_auroc_unsigned": pick["auroc_unsigned"],
         "inner_auroc_signed": pick["auroc_signed"],
@@ -187,6 +187,15 @@ def _export(a, tr, pick, rows, y_uns, y_sgn) -> None:
         "act_norm_mean": float(np.linalg.norm(xu, axis=1).mean()),
         "sweep": rows,
     }
+    # The fast path skips the sweep, so carry forward the record of how the
+    # layer was chosen rather than silently dropping it.
+    prior = out.with_suffix(".json")
+    if not rows and prior.exists():
+        old = json.loads(prior.read_text())
+        meta["sweep"] = old.get("sweep", [])
+        for k in ("inner_auroc_unsigned", "inner_auroc_signed"):
+            if np.isnan(meta[k]):
+                meta[k] = old.get(k)
     out.with_suffix(".json").write_text(json.dumps(meta, indent=2))
     print(f"\nwrote {out} and {out.with_suffix('.json')}")
     print(f"  cos(signed probe, signed CAA)   = {meta['cos_signed_probe_to_caa']:+.3f}")

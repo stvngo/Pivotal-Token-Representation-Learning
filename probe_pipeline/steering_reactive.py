@@ -74,7 +74,7 @@ class SteeringStats:
     # rows until the whole batch is done, and those pad positions would
     # otherwise inflate every denominator.
     p_steer: list[np.ndarray] = field(default_factory=list)
-    fired: list[np.ndarray] = field(default_factory=list)
+    perturbed: list[np.ndarray] = field(default_factory=list)
 
     @property
     def duty_cycle(self) -> float:
@@ -100,15 +100,22 @@ class SteeringStats:
             "energy": float(self.energy),
         }
 
-    def trimmed_rates(self, n_new: list[int]) -> dict[str, float]:
-        """Recompute rates counting only each row's real generated tokens."""
-        if not self.fired:
-            return {"fire_rate": 0.0, "n_positions": 0}
-        fired = np.stack(self.fired)                       # (steps, B)
-        keep = np.arange(fired.shape[0])[:, None] < np.asarray(n_new)[None, :]
+    def trimmed(self, n_new: list[int]) -> dict[str, float]:
+        """Duty cycle over each row's real generated tokens only.
+
+        HF keeps stepping finished rows until the whole batch is done. Those
+        pad positions are gated like any other and would otherwise inflate
+        the denominator of every rate, so they are dropped here. Duty cycle,
+        not fire rate, is what has to match across arms: a hysteresis-held
+        position receives the full perturbation.
+        """
+        if not self.perturbed:
+            return {"duty_cycle_trimmed": 0.0, "n_positions_trimmed": 0}
+        pert = np.stack(self.perturbed)                    # (steps, B)
+        keep = np.arange(pert.shape[0])[:, None] < np.asarray(n_new)[None, :]
         return {
-            "fire_rate": float(fired[keep].mean()) if keep.any() else 0.0,
-            "n_positions": int(keep.sum()),
+            "duty_cycle_trimmed": float(pert[keep].mean()) if keep.any() else 0.0,
+            "n_positions_trimmed": int(keep.sum()),
         }
 
 
@@ -207,10 +214,11 @@ class CascadeSteeringHook:
             return torch.ones(b, dtype=torch.bool, device=h.device), p
         if self.gate_mode == MODE_PATTERN:
             row = self.pattern[self._step] if self._step < len(self.pattern) else False
-            fresh = torch.as_tensor(
-                np.broadcast_to(np.asarray(row, dtype=bool), (b,)).copy(),
-                device=h.device,
-            )
+            row = np.asarray(row, dtype=bool)
+            # The final batch of a run is usually short, so a pattern built
+            # for the full batch width has to be sliced, not broadcast.
+            row = row[:b] if row.ndim and row.size >= b else np.broadcast_to(row, (b,))
+            fresh = torch.as_tensor(row.copy(), device=h.device)
         else:
             fresh = p > self.threshold
 
@@ -243,7 +251,7 @@ class CascadeSteeringHook:
         perturb, p = self._decide(h)
         self.stats.n_positions += int(h.shape[0])
         self.stats.p_steer.append(p.detach().float().cpu().numpy())
-        self.stats.fired.append(perturb.detach().cpu().numpy())
+        self.stats.perturbed.append(perturb.detach().cpu().numpy())
         self._step += 1
 
         if not bool(perturb.any()):

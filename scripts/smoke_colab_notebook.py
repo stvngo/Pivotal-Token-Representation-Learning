@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 VARIANTS = ("main", "random_control", "greedy", "layer_sweep", "additive", "codelion",
-            "probe_weights", "reactive", "nie")
+            "probe_weights", "nie")
 
 
 # --------------------------------------------------------------------------- shared helpers
@@ -675,101 +675,6 @@ def _load_probe_bias(repo_root: Path, layer: int) -> float:
     )
 
 
-def run_variant_reactive(args, out_dir, device, dtype, probe_dir):
-    """Smoke test for notebooks/steering_reactive.ipynb. Exercises always_on,
-    reactive_detect, and reactive_random arms in 1 example each.
-
-    The reactive smoke uses a tiny ``max_new_tokens`` budget so we hit the
-    hook on the order of 50-100 decode steps -- enough to verify the gate
-    fires, log file is non-empty, and energy/fire-rate are tracked.
-    """
-    from probe_pipeline.steering_reactive import (
-        ReactiveSteeringHook,
-        build_random_fire_pattern,
-    )
-
-    w = _load_probe_weights(REPO_ROOT, args.layer)
-    b = _load_probe_bias(REPO_ROOT, args.layer)
-    cfg, vec, _, _ = load_probe(probe_dir, args.layer)
-    vec_tensor = torch.from_numpy(vec).to(torch.float32)
-
-    tokenizer, model = load_model(args.model, device, dtype)
-    conv_ok = run_convention_check(model, args.layer)
-    examples = load_examples(args.max_examples, args.seed)
-    gen = make_generator(model, tokenizer, device, args.max_new_tokens)
-
-    base_res, base_met = run_once(gen, examples, None, "base", args.seed)
-    save_run(out_dir, "base", base_res, base_met,
-             extra=prov(args.layer, "none", "n/a", conv_ok))
-
-    coef = args.factor - 1.0
-    arms = {}
-
-    # Always-on baseline (re-register through the reactive hook with prefill on
-    # so it behaves like make_hook applied at every decode step).
-    always_hook = ReactiveSteeringHook(
-        model, args.layer, w, b, vec, coef,
-        mode="additive_normalized", threshold=-1e9,  # always fires
-        hysteresis=0, always_on_during_prefill=True,
-    )
-    with always_hook:
-        always_res, always_met = run_once(gen, examples, None, "always_on", args.seed)
-    arms["always_on"] = always_hook.stats.to_dict()
-    save_run(out_dir, "always_on", always_res, always_met, extra={
-        **prov(args.layer, "additive_normalized",
-               cfg.get("vector_source", "caa_val"), conv_ok),
-        "arm": "always_on", "factor": args.factor,
-        "fire_rate": arms["always_on"]["fire_rate"],
-        "energy": arms["always_on"]["energy"],
-    })
-
-    # Reactive on the binary probe.
-    detect_hook = ReactiveSteeringHook(
-        model, args.layer, w, b, vec, coef,
-        mode="additive_normalized", threshold=0.5, hysteresis=2,
-    )
-    with detect_hook:
-        det_res, det_met = run_once(gen, examples, None, "reactive_detect", args.seed)
-    arms["reactive_detect"] = detect_hook.stats.to_dict()
-    detect_fire_rate = arms["reactive_detect"]["fire_rate"]
-    save_run(out_dir, "reactive_detect", det_res, det_met, extra={
-        **prov(args.layer, "additive_normalized", f"probe_layer{args.layer}",
-               conv_ok),
-        "arm": "reactive_detect", "factor": args.factor,
-        "fire_rate": detect_fire_rate,
-        "energy": arms["reactive_detect"]["energy"],
-        "n_calls": arms["reactive_detect"]["n_calls"],
-        "n_fired": arms["reactive_detect"]["n_fired"],
-    })
-
-    # Random-fire control matched to the detect arm's empirical fire rate.
-    rate = max(0.05, min(0.95, detect_fire_rate or 0.2))
-    n_steps = max(64, args.max_new_tokens * args.max_examples + 16)
-    pattern = build_random_fire_pattern(n_steps, rate, seed=101)
-    rand_hook = ReactiveSteeringHook(
-        model, args.layer, w, b, vec, coef,
-        mode="additive_normalized", threshold=0.5, hysteresis=0,
-        force_fire_pattern=pattern,
-    )
-    with rand_hook:
-        rand_res, rand_met = run_once(gen, examples, None, "reactive_random", args.seed)
-    arms["reactive_random"] = rand_hook.stats.to_dict()
-    save_run(out_dir, "reactive_random", rand_res, rand_met, extra={
-        **prov(args.layer, "additive_normalized", "random_pattern_seed101",
-               conv_ok),
-        "arm": "reactive_random", "factor": args.factor,
-        "fire_rate": arms["reactive_random"]["fire_rate"],
-        "energy": arms["reactive_random"]["energy"],
-        "expected_fire_rate": rate,
-    })
-
-    (out_dir / "reactive_summary.json").write_text(json.dumps(arms, indent=2))
-    print(f"[smoke/reactive] base={base_met['accuracy']:.3f} "
-          f"always={always_met['accuracy']:.3f} "
-          f"detect={det_met['accuracy']:.3f} (fire={detect_fire_rate:.2f}) "
-          f"random={rand_met['accuracy']:.3f}")
-
-
 def run_variant_nie(args, out_dir, device, dtype, probe_dir):
     """Smoke test for notebooks/nie_eval.ipynb. Runs ``compute_token_nie`` on
     a couple of synthetic probe rows with hand-picked labels so the harness
@@ -847,7 +752,6 @@ RUNNERS = {
     "additive": run_variant_additive,
     "codelion": run_variant_codelion,
     "probe_weights": run_variant_probe_weights,
-    "reactive": run_variant_reactive,
     "nie": run_variant_nie,
 }
 
