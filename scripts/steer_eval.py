@@ -173,6 +173,10 @@ def main() -> None:
     ap.add_argument("--rate", type=float, default=0.05, help="primary fire rate")
     ap.add_argument("--alpha-grid", default="0.02,0.10")
     ap.add_argument("--rate-grid", default="0.02,0.10")
+    ap.add_argument("--hyst-grid", default="",
+                    help="exploratory: hold the gate on for N extra positions "
+                         "after a detection. A single-token nudge may be too "
+                         "transient to change a trajectory.")
     ap.add_argument("--hysteresis", type=int, default=0)
     ap.add_argument("--stage", default="all", choices=["primary", "all"])
     ap.add_argument("--out", default=None)
@@ -377,6 +381,13 @@ def main() -> None:
             base_kw, vector=v_signed, coef=a.alpha,
             gate_mode=MODE_REACTIVE, threshold=thresh(r)))
         record(f"dose_rate_{r}", arm, st)
+    for hy in [int(x) for x in a.hyst_grid.split(",") if x]:
+        kw = dict(base_kw)
+        kw["hysteresis"] = hy
+        arm, st = run(name=f"h{hy}", hook_kwargs=dict(
+            kw, vector=v_signed, coef=a.alpha,
+            gate_mode=MODE_REACTIVE, threshold=thresh(a.rate)))
+        record(f"dose_hysteresis_{hy}", arm, st)
 
     _finish(a, results, t0, prim)
 
