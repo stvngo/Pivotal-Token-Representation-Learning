@@ -100,13 +100,13 @@ def test_post_hook_sees_hidden_states_at_the_probe_layer() -> None:
     seen = {}
 
     hook = CascadeSteeringHook(m, **_hook_kwargs(coef=0.0, gate_mode=MODE_OBSERVE))
-    orig = hook.p_steer
+    orig = hook.probs
 
     def spy(h):
         seen["h"] = h.detach().clone()
         return orig(h)
 
-    hook.p_steer = spy
+    hook.probs = spy
     x = _decode_step()
     with hook:
         states = m(x)

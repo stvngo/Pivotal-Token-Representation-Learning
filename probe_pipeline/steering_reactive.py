@@ -75,6 +75,13 @@ class SteeringStats:
     # otherwise inflate every denominator.
     p_steer: list[np.ndarray] = field(default_factory=list)
     perturbed: list[np.ndarray] = field(default_factory=list)
+    # Recorded separately because the two halves of the cascade can fail in
+    # different ways. The probes were fit on raw-conditioned PTS rollouts and
+    # run here on chat-templated generation, so a degenerate gate -- every
+    # P(pivotal) pinned at 0 or 1 -- is a live possibility and has to be
+    # visible rather than hidden inside their product.
+    p_pivotal: list[np.ndarray] = field(default_factory=list)
+    p_helpful: list[np.ndarray] = field(default_factory=list)
 
     @property
     def duty_cycle(self) -> float:
@@ -193,19 +200,26 @@ class CascadeSteeringHook:
 
     # -- gating ------------------------------------------------------------
 
+    def probs(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """``(P(pivotal), P(helpful))`` for a ``(B, d)`` residual batch."""
+        hf = h.float()
+        p_piv = torch.sigmoid(hf @ self.gate_w.to(hf.device) + self.gate_b)
+        if self.sign_w is None:
+            return p_piv, None
+        return p_piv, torch.sigmoid(hf @ self.sign_w.to(hf.device) + self.sign_b)
+
     def p_steer(self, h: torch.Tensor) -> torch.Tensor:
         """``P(pivotal) * (1 - P(helpful))`` for a ``(B, d)`` residual batch."""
-        hf = h.float()
-        w = self.gate_w.to(hf.device)
-        p_piv = torch.sigmoid(hf @ w + self.gate_b)
-        if self.sign_w is None:
-            return p_piv
-        p_help = torch.sigmoid(hf @ self.sign_w.to(hf.device) + self.sign_b)
-        return p_piv * (1.0 - p_help)
+        p_piv, p_help = self.probs(h)
+        return p_piv if p_help is None else p_piv * (1.0 - p_help)
 
     def _decide(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Return ``(perturb, p_steer)`` for a ``(B, d)`` batch."""
-        p = self.p_steer(h)
+        p_piv, p_help = self.probs(h)
+        p = p_piv if p_help is None else p_piv * (1.0 - p_help)
+        self.stats.p_pivotal.append(p_piv.detach().float().cpu().numpy())
+        if p_help is not None:
+            self.stats.p_helpful.append(p_help.detach().float().cpu().numpy())
         b = h.shape[0]
 
         if self.gate_mode == MODE_OBSERVE:

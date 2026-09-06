@@ -97,7 +97,8 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
     # The hook must be reset between batches: its latch and step cursor are
     # per-batch state, and generate() is called once per batch inside
     # generate_batched. Rather than reach inside, run batch by batch here.
-    resp, nnew, stats, p_all = [], [], [], []
+    resp, nnew, stats = [], [], []
+    p_all, piv_all, help_all = [], [], []
     for i in range(0, len(prompts), batch_size):
         chunk = list(prompts[i:i + batch_size])
         hook = CascadeSteeringHook(model, **hook_kwargs)
@@ -110,9 +111,16 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
         s.update(hook.stats.trimmed(k))
         stats.append(s)
         if hook.stats.p_steer:
-            ps = np.stack(hook.stats.p_steer)                     # (steps, B)
-            keep = np.arange(ps.shape[0])[:, None] < np.asarray(k)[None, :]
-            p_all.append(ps[keep])
+            keep = None
+            for key, sink in (("p_steer", p_all), ("p_pivotal", piv_all),
+                              ("p_helpful", help_all)):
+                seq = getattr(hook.stats, key)
+                if not seq:
+                    continue
+                arr = np.stack(seq)                               # (steps, B)
+                if keep is None:
+                    keep = np.arange(arr.shape[0])[:, None] < np.asarray(k)[None, :]
+                sink.append(arr[keep])
         hook.reset()
 
     agg = {
@@ -129,7 +137,9 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
     agg["duty_cycle_trimmed"] = sum(
         s["duty_cycle_trimmed"] * s["n_positions_trimmed"] for s in stats
     ) / max(1, agg["n_positions_trimmed"])
-    agg["p_steer"] = np.concatenate(p_all) if p_all else np.zeros(0)
+    for key, sink in (("p_steer", p_all), ("p_pivotal", piv_all),
+                      ("p_helpful", help_all)):
+        agg[key] = np.concatenate(sink) if sink else np.zeros(0)
     return score(resp, golds, nnew, name=name, max_new_tokens=max_new_tokens), agg
 
 
@@ -198,9 +208,29 @@ def main() -> None:
     base_mask = obs_arm.correct_mask
     results["base"] = obs_arm.as_dict()
     p = obs["p_steer"]
-    print(f"    base {obs_arm.accuracy:.4f} | {len(p)} decode positions | "
-          f"p_steer mean {p.mean():.4f} p95 {np.quantile(p, 0.95):.4f} "
-          f"max {p.max():.4f}", flush=True)
+
+    def dist(x):
+        return {"mean": float(x.mean()), "sd": float(x.std()),
+                "p05": float(np.quantile(x, 0.05)), "p50": float(np.quantile(x, 0.50)),
+                "p95": float(np.quantile(x, 0.95)), "max": float(x.max())}
+
+    # The probes were fit on raw-conditioned PTS rollouts; generation here is
+    # chat-templated. If that shift has broken the gate it shows up as a
+    # degenerate distribution -- everything pinned near 0 or 1 -- and the
+    # thresholds below would then be quantiles of noise.
+    results["observe"] = {
+        "n_decode_positions": int(len(p)),
+        "p_steer": dist(p),
+        "p_pivotal": dist(obs["p_pivotal"]) if len(obs["p_pivotal"]) else None,
+        "p_helpful": dist(obs["p_helpful"]) if len(obs["p_helpful"]) else None,
+        "train_logit_means": {k: checks[k] for k in ("mean_gate_logit", "mean_sign_logit")},
+    }
+    print(f"    base {obs_arm.accuracy:.4f} | {len(p)} decode positions", flush=True)
+    for k in ("p_steer", "p_pivotal", "p_helpful"):
+        d = results["observe"][k]
+        if d:
+            print(f"    {k:<10} mean {d['mean']:.4f} sd {d['sd']:.4f} "
+                  f"p50 {d['p50']:.4f} p95 {d['p95']:.4f} max {d['max']:.4f}", flush=True)
 
     def thresh(rate: float) -> float:
         return float(np.quantile(p, 1.0 - rate))
@@ -221,7 +251,8 @@ def main() -> None:
 
     def record(nm, arm, st, primary=False):
         d = arm.as_dict()
-        d.update({k: v for k, v in st.items() if k != "p_steer"})
+        d.update({k: v for k, v in st.items()
+                  if k not in ("p_steer", "p_pivotal", "p_helpful")})
         d["vs_base"] = mcnemar(base_mask, arm.correct_mask)
         d["delta_acc"] = arm.accuracy - obs_arm.accuracy
         d["primary"] = primary

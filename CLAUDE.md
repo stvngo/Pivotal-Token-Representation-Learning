@@ -20,7 +20,7 @@ builds with `make`).
 
 ## Current state
 
-Working branch: `rebuild/pipeline-and-scale`. 200 tests, no skips, none
+Working branch: `rebuild/pipeline-and-scale`. 214 tests, no skips, none
 needing a GPU or network. Paper is 7 pages, builds with `make`.
 
 **Three model scales run end to end**, 3,000 GSM8K questions each, PTS
@@ -66,6 +66,25 @@ Published (private, under `stvngo/`): `Qwen3-{0.6B,1.7B,4B}-pts-tokens`
 and `Qwen3-{0.6B,1.7B,4B}-pivotal-activations`. Run state mirrors to
 `stvngo/ptrl-runs`.
 
+**Phase 6 (causal validation) is in flight.** The rebuilt GSM8K evaluator
+clears its gate decisively -- greedy accuracy 0.567 / 0.817 / 0.940 for
+0.6B / 1.7B / 4B against the v1 harness's 0.16-0.20, so the four v1
+confounds (no chat template, 256-token truncation, a parser reading the
+prompt, per-arm seeding) accounted for essentially the whole gap.
+
+But 0.940 at 4B leaves 18 questions to move, and 4B is the *only* scale
+where the signed probe is validated. So the intervention is evaluated on
+the `[0.2, 0.8]` band PTS itself searches (`scripts/screen_band.py`),
+estimated from independent rollouts before any arm runs -- selecting on
+whether the base arm got a question right would condition on a random
+outcome, and regression to the mean would then flatter any intervention.
+
+Steering layers, chosen on an inner split of train by max-min of the
+unsigned and signed AUROCs (`scripts/fit_steering_probes.py`): **11 at
+0.6B, 21 at 4B**. The 4B pick lands on the same layer the independent
+signed-probe evaluation chose, and its inner-split signed AUROC (0.758)
+matches the held-out 0.780.
+
 ## Conventions that must not drift
 
 | Convention | Why |
@@ -75,6 +94,9 @@ and `Qwen3-{0.6B,1.7B,4B}-pivotal-activations`. Run state mirrors to
 | Split by **question**, never by row | Positions in one trace are not independent. |
 | Negatives from the **pivot-bearing span** | See "negative sampling" below. Not optional. |
 | Rows carry **token ids**, never decoded text | `encode(decode(ids)) != ids`; the round trip shifted labels in v1. |
+| Steering uses a **post**-hook on `_get_decoder_layer(model, L)` | Its output *is* `hidden_states[L]`. A pre-hook there sees `[L-1]`, which is what the old reactive hook did. |
+| Gate and steering share one layer | The gate must fire in the forward pass that produces the token it fired on, so it cannot sit above the steering site. |
+| Probe weights crossing a process boundary are **raw-space** | `to_raw_space` output only. `gate_check` in `steer_eval.py` asserts it against stored logits. |
 | `prob_delta` carried through | The signed probe needs it; v1 dropped it. |
 
 ## Statistical discipline
@@ -160,6 +182,19 @@ the shell running it has that string in its own command line. It also
 silently hides a job that never launched. Match on `venv/bin/python.*<script>`
 or poll the output file for a sentinel string instead.
 
+**zsh does not word-split unquoted expansions.** A launch loop of the form
+`for pair in "sess model"; do set -- $pair; ...` passes the *whole string*
+as `$1` and leaves `$2` empty. Under bash this works; under zsh every job
+silently no-ops, and `colab_job.py` returns nothing rather than erroring.
+Write the invocations out, or use `${=pair}`.
+
+**GSM8K is saturated at 4B.** Greedy accuracy is 0.940 with a chat
+template and a 640-token budget. Any steering result on the full test set
+would be a ceiling artifact, so the causal evaluation runs on the
+`[0.2, 0.8]` band. This is not cherry-picking: it is the population PTS
+defines pivotality on, since a token cannot shift `P(success)` for a
+question whose outcome is already settled.
+
 **`nohup cmd &` inside a compound Bash call gets reaped** when the harness
 call returns. Long local jobs need `run_in_background: true` on the tool
 call, not a backgrounded subshell.
@@ -179,10 +214,15 @@ probe_pipeline/
   extract_v2.py       forward passes -> cache (also records entropy/margin)
   probes.py           fitting, raw-space export, nested selection, cluster CIs
   baselines.py        the rival explanations
+  steering.py         make_hook (3 modes), _get_decoder_layer
+  steering_reactive.py CascadeSteeringHook: post-hook, P(piv)*(1-P(help)) gate
+  gsm8k_eval_v2.py    chat-templated, response-only parse, exact pairing
   artifacts_io.py     content-addressed cache, local + HF
 scripts/              colab, colab_job, colab_reattach, pts_run,
                       build_and_extract, evaluate_probes_v2,
-                      compare_baselines, push_to_hf
+                      compare_baselines, push_to_hf,
+                      gsm8k_baseline, screen_band,
+                      fit_steering_probes, steer_eval
 docs/                 pts_semantics.md (upstream, pinned 8334808),
                       colab_cli.md, issues.md (STALE — see below)
 ```
