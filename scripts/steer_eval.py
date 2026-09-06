@@ -191,6 +191,16 @@ def main() -> None:
     ap.add_argument("--rate", type=float, default=0.05, help="primary fire rate")
     ap.add_argument("--alpha-grid", default="0.02,0.10")
     ap.add_argument("--rate-grid", default="0.02,0.10")
+    ap.add_argument("--gate", default="cascade", choices=["cascade", "pivotal"],
+                    help="'cascade' is P(pivotal)*(1-P(helpful)); 'pivotal' is "
+                         "the plain unsigned probe, which is what the original "
+                         "PTS label supports and what a reader would try first.")
+    ap.add_argument("--direction", default="signed_caa",
+                    choices=["signed_caa", "unsigned_caa",
+                             "signed_probe", "unsigned_probe"],
+                    help="'caa' is a mean difference, 'probe' is the logistic "
+                         "regression weight vector. They are not the same "
+                         "object and need not point the same way.")
     ap.add_argument("--n-random-dirs", type=int, default=3,
                     help="independent random directions to average the "
                          "random-direction control over")
@@ -240,8 +250,18 @@ def main() -> None:
     dtype = torch.float32 if a.device in ("cpu", "mps") else torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(a.model, dtype=dtype).to(a.device).eval()
 
-    v_signed = npz["v_signed"]
-    v_unsigned = npz["v_unsigned"]
+    # The direction actually steered along. Four are exported: mean-difference
+    # and probe-weight, each signed and unsigned. The unsigned pair comes from
+    # the sign-symmetric |prob_delta| > tau label, so it has no principled
+    # polarity -- which is the point of offering it as a comparison rather
+    # than assuming the signed one is the only candidate worth testing.
+    v_primary = npz[{
+        "signed_caa": "v_signed", "unsigned_caa": "v_unsigned",
+        "signed_probe": "v_signed_probe", "unsigned_probe": "v_unsigned_probe",
+    }[a.direction]]
+    v_signed = v_primary
+    v_unsigned = npz["v_unsigned" if a.direction.startswith("signed")
+                     else "v_signed"]
     # Several independent draws, not one. A single random vector has real
     # variance, and this project has already been caught reporting one draw
     # as if it were a null distribution (the AUROC control averaged eight
@@ -252,7 +272,8 @@ def main() -> None:
     v_random = v_randoms[0]
 
     base_kw = dict(layer=layer, gate_w=npz["gate_w"], gate_b=float(npz["gate_b"]),
-                   sign_w=npz["sign_w"], sign_b=float(npz["sign_b"]),
+                   sign_w=npz["sign_w"] if a.gate == "cascade" else None,
+                   sign_b=float(npz["sign_b"]),
                    mode=a.mode, hysteresis=a.hysteresis)
     run = lambda **kw: run_arm(model, tok, prompts, golds, max_new_tokens=a.max_new_tokens,  # noqa: E731
                                batch_size=a.batch_size, **kw)
@@ -423,7 +444,8 @@ def main() -> None:
 
     # -- direction and gate controls ---------------------------------------
     print("[5] direction / gate controls", flush=True)
-    arm, st = run(name="unsigned_dir", hook_kwargs=dict(
+    # Named for what it is relative to the primary: the other direction.
+    arm, st = run(name="other_dir", hook_kwargs=dict(
         base_kw, vector=v_unsigned, coef=a.alpha,
         gate_mode=MODE_REACTIVE, threshold=thresh(a.rate)))
     record("unsigned_direction", arm, st)
@@ -436,12 +458,13 @@ def main() -> None:
 
     # Gate on P(pivotal) alone: the cascade's signed half removed, so the
     # same direction fires on pivots regardless of whether they help.
-    ung = dict(base_kw)
-    ung["sign_w"] = None
-    arm, st = run(name="unsigned_gate", hook_kwargs=dict(
-        ung, vector=v_signed, coef=a.alpha, gate_mode=MODE_REACTIVE,
-        threshold=thresh(a.rate, obs["p_pivotal"])))
-    record("unsigned_gate", arm, st)
+    if a.gate == "cascade":
+        ung = dict(base_kw)
+        ung["sign_w"] = None
+        arm, st = run(name="unsigned_gate", hook_kwargs=dict(
+            ung, vector=v_primary, coef=a.alpha, gate_mode=MODE_REACTIVE,
+            threshold=thresh(a.rate, obs["p_pivotal"])))
+        record("unsigned_gate", arm, st)
 
     # -- dose response -----------------------------------------------------
     print("[6] dose response", flush=True)
@@ -469,6 +492,7 @@ def main() -> None:
 def _finish(a, results, t0, prim) -> None:
     results["_meta"] = {
         "model": a.model, "probes": a.probes, "band": a.band,
+        "gate": a.gate, "direction": a.direction, "stage": a.stage,
         "mode": a.mode, "primary_alpha": a.alpha, "primary_rate": a.rate,
         "hysteresis": a.hysteresis, "seconds": round(time.time() - t0, 1),
         "primary_arm": "reactive",
