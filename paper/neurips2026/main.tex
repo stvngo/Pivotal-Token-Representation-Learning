@@ -3,6 +3,11 @@
 % Track: switch \usepackage[preprint] to [dblblindworkshop] and set
 % \workshoptitle{} for submission. Build with `make`.
 %
+% NOTE: the author block below carries a real name and affiliation, which
+% is correct for [preprint] and must NOT be left in place when switching to
+% [dblblindworkshop] -- that track is double blind and the style file will
+% not strip it for you.
+%
 % Every number in Section 5 traces to
 % artifacts/probes_v2_full/qwen3-0.6b_report.json, produced by
 % scripts/evaluate_probes_v2.py on data this project generated
@@ -31,7 +36,8 @@
 \title{Pivotal Tokens Are Linearly Predictable\\ Before They Are Generated}
 
 \author{%
-  Steven Ngo \\
+  Steven Ngo\thanks{Dataset and code will be provided upon acceptance.} \\
+  University of California, San Diego \\
   \texttt{svngo@ucsd.edu} \\
 }
 
@@ -40,40 +46,27 @@
 \maketitle
 
 \begin{abstract}
-Pivotal Token Search (PTS) labels a generated token as pivotal when it
-moves the model's probability of reaching a correct answer past a
-threshold, estimated by sampling many rollouts and adjudicating each with
-an oracle. We ask whether that expensive, outcome-grounded property is
-already present in the model's activations \emph{one position before} the
-token is emitted --- the only position at which a prediction could still
-gate an intervention. We generate PTS events for three model scales
-(Qwen3-0.6B, 1.7B, 4B) over 3{,}000 GSM8K questions each, using a
-reimplementation of the search that batches rollouts across queries and
-emits exact token positions, and train linear probes at $t{-}1$.
-Pivotality is decodable at every scale, and the probe beats every cheaper
-explanation we tested --- token identity, next-token entropy, top-2 margin,
-top-1 probability --- with differences bootstrapped over questions on paired
-resamples. The informative pattern is how the margin \emph{scales}: probe
-AUROC rises monotonically with model size ($0.807 \to 0.863 \to 0.897$)
-while entropy stays flat ($0.693 \to 0.721 \to 0.694$), so the advantage
-over predictive uncertainty widens from $+0.112$ ($p{=}0.013$) to
-$+0.204$ ($p{<}0.001$). Larger models encode pivotality more linearly, and
-what they encode is increasingly \emph{not} uncertainty. We also show the
-comparison is fragile in a way that is easy to miss: drawing negative
-examples from the whole rollout rather than the span where pivots occur
-inflates entropy to 0.814 and erases the advantage entirely. Moving the
-probe to the pivot token itself inverts entropy to \emph{below chance},
-replicated across scales --- uncertainty peaks immediately before a pivotal
-token and collapses immediately after. We further find that the \emph{sign} of
-the impending shift --- whether the next token will help or hurt --- is
-itself decodable at $t{-}1$, but only at scale: a clean null at 0.6B
-(separated from nothing, not even a random direction) becoming 0.780 AUROC
-at 4B, separated from every cheaper explanation. Because entropy is
-sign-blind, and because a lookup on the current token cannot encode the
-sign of a token not yet emitted, this result is immune to both deflationary
-accounts. We also document two ways such measurements inflate: collapsing a question's sampled rollouts to one
-canonical sequence discards 74\% of the supervision, and selecting the best
-layer on the reporting split adds 0.063 AUROC.
+Pivotal Token Search (PTS) labels a generated token pivotal when it moves
+the model's probability of reaching a correct answer past a threshold,
+estimated by sampling many rollouts and adjudicating each with an oracle.
+We ask whether that expensive, outcome-grounded property is already
+present in the residual stream \emph{one position before} the token is
+emitted --- the only position at which a prediction could still gate an
+intervention. Generating PTS events for three Qwen3 scales over 3{,}000
+GSM8K questions each, we find pivotality is linearly decodable at $t{-}1$
+at every scale (AUROC $0.807$--$0.897$), above token identity and above
+every next-token uncertainty statistic we test, with all comparisons
+bootstrapped over questions on paired resamples. The informative pattern
+is how the margin \emph{scales}: probe AUROC rises with model size while
+entropy stays flat, so the advantage over predictive uncertainty widens
+from $+0.112$ to $+0.204$. The \emph{sign} of the impending shift ---
+whether the next token will help or hurt --- is decodable too, but only at
+scale: a clean null at 0.6B becoming $0.780$ AUROC at 4B, separated from
+token identity, from uncertainty (which is sign-blind by construction),
+and from a random direction. Reading the representation and acting on it
+are different things. Across four intervention families, three scales and
+128 steered arms, probe-gated steering does not change GSM8K accuracy:
+six arms reach nominal $p < 0.05$ where chance predicts 6.4.
 \end{abstract}
 
 \section{Introduction}
