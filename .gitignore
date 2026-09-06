@@ -68,6 +68,11 @@ torch_compile_cache/
 ### Local pipeline runs
 artifacts/
 data/probe_dataset/
+# Activation caches. Individual patterns above miss the report .json files
+# that sit alongside them, so a blind `git add -A` still stages hundreds of
+# MB. Ignore the directories outright; they are reproducible from events.
+data/acts_*/
+
 
 /nb_results
 nb_results*.zip
