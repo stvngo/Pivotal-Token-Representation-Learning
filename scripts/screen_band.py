@@ -51,6 +51,12 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=48)
     ap.add_argument("--temperature", type=float, default=0.6)
     ap.add_argument("--split", default="test")
+    ap.add_argument("--offset", type=int, default=0,
+                    help="skip this many questions first. GSM8K test is only "
+                         "1319 questions and the band is a small slice of it, "
+                         "so the upper scales need train[3000:] as well -- PTS "
+                         "consumed train[0:3000] and nothing else, so the "
+                         "remainder is unseen by both the search and the probes.")
     ap.add_argument("--out", default=None)
     ap.add_argument("--hf-repo", default=None)
     a = ap.parse_args()
@@ -60,7 +66,8 @@ def main() -> None:
 
     tok = AutoTokenizer.from_pretrained(a.model)
     ds = load_dataset("openai/gsm8k", "main", split=a.split)
-    ds = ds.select(range(min(a.n, len(ds))))
+    lo = min(a.offset, len(ds))
+    ds = ds.select(range(lo, min(lo + a.n, len(ds))))
     questions = [r["question"] for r in ds]
     golds = [extract_gold(r["answer"]) for r in ds]
     prompts = build_prompts(questions, tok)
@@ -85,10 +92,11 @@ def main() -> None:
               f"({time.time()-t0:.0f}s)", flush=True)
 
     p_hat = [s / a.rollouts for s in n_success]
-    band = [i for i, p in enumerate(p_hat) if a.min_prob <= p <= a.max_prob]
+    band = [lo + i for i, p in enumerate(p_hat) if a.min_prob <= p <= a.max_prob]
 
     report = {
-        "model": a.model, "split": a.split, "n_screened": len(prompts),
+        "model": a.model, "split": a.split, "offset": a.offset,
+        "n_screened": len(prompts),
         "rollouts": a.rollouts, "min_prob": a.min_prob, "max_prob": a.max_prob,
         "seconds": round(time.time() - t0, 1),
         "mean_success": sum(p_hat) / len(p_hat),
@@ -103,7 +111,8 @@ def main() -> None:
           f"[{a.min_prob}, {a.max_prob}]  (mean success {report['mean_success']:.3f})",
           flush=True)
 
-    out = Path(a.out or f"/content/band_{a.model.split('/')[-1]}.json")
+    tag = a.model.split("/")[-1] + (f"_{a.split}{a.offset}" if a.offset or a.split != "test" else "")
+    out = Path(a.out or f"/content/band_{tag}.json")
     out.write_text(json.dumps(report, indent=2))
     print(f"wrote {out}")
 

@@ -152,6 +152,9 @@ def main() -> None:
     ap.add_argument("--max-new-tokens", type=int, default=640)
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--split", default="test")
+    ap.add_argument("--bands", default=None,
+                    help="comma-separated band files to pool, when one split "
+                         "does not supply enough in-band questions")
     ap.add_argument("--mode", default="additive_normalized")
     ap.add_argument("--alpha", type=float, default=0.05, help="primary coefficient")
     ap.add_argument("--rate", type=float, default=0.05, help="primary fire rate")
@@ -175,10 +178,19 @@ def main() -> None:
 
     tok = AutoTokenizer.from_pretrained(a.model)
     ds = load_dataset("openai/gsm8k", "main", split=a.split)
-    if a.band:
-        idx = json.loads(Path(a.band).read_text())["indices"][: a.n]
+    band_files = [f for f in ((a.bands or a.band or "").split(",")) if f]
+    if band_files:
+        idx = []
+        for f in band_files:
+            b = json.loads(Path(f).read_text())
+            if b.get("split", "test") != a.split:
+                raise SystemExit(f"{f} screened split {b.get('split')!r}, "
+                                 f"but --split is {a.split!r}")
+            idx.extend(b["indices"])
+        idx = sorted(set(idx))[: a.n]
         ds = ds.select(idx)
-        print(f"[band] {len(idx)} in-band questions", flush=True)
+        print(f"[band] {len(idx)} in-band questions from "
+              f"{len(band_files)} screen(s)", flush=True)
     else:
         ds = ds.select(range(min(a.n, len(ds))))
     questions = [r["question"] for r in ds]
