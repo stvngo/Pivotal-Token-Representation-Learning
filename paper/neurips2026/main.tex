@@ -543,41 +543,60 @@ everything else at 0.836 against a base rate of 0.207.
 
 \begin{table}[t]
 \centering
-\caption{Pooled Qwen3-4B, 336 in-band questions, greedy decoding. Only the
+\caption{Qwen3-4B, 336 in-band questions, greedy decoding. Only the
 pre-registered primary arm carries an inference; the rest are controls,
 shown with net flips so size and direction are visible. Duty is the
-fraction of decode positions perturbed, holds included.}
+fraction of decode positions perturbed, holds included. The three random
+directions are independent draws, not one direction reported three times.}
 \label{tab:causal4b}
-\begin{tabular}{lrrrrr}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrr}
 \toprule
-arm & acc & $\Delta$ & duty & net & $p$ \\
+arm & acc & $\Delta$ & net & $p$ \\
 \midrule
-unsteered & 0.580 & --- & --- & --- & --- \\
-reactive, signed direction (primary) & 0.565 & $-0.015$ & 0.051 & $-5$ & 0.551 \\
-always-on, matched energy & 0.583 & $+0.003$ & 1.000 & $+1$ & --- \\
-random placement, matched duty & 0.568 & $-0.012$ & 0.053 & $-4$ & --- \\
-coefficient negated & 0.589 & $+0.009$ & 0.050 & $+3$ & --- \\
-unsigned direction & 0.580 & $+0.000$ & 0.049 & $0$ & --- \\
-gate on $P(\text{pivotal})$ only & 0.568 & $-0.012$ & 0.050 & $-4$ & --- \\
-random direction & 0.580 & $+0.000$ & 0.050 & $0$ & --- \\
+unsteered & 0.604 & --- & --- & --- \\
+reactive, signed direction (primary) & 0.557 & $-0.048$ & $-16$ & 0.020 \\
+\midrule
+always-on, matched energy & 0.569 & $-0.036$ & $-12$ & --- \\
+random placement, matched duty & 0.569 & $-0.036$ & $-12$ & --- \\
+gate on $P(\text{pivotal})$ only & 0.571 & $-0.033$ & $-11$ & --- \\
+coefficient negated & 0.595 & $-0.009$ & $-3$ & --- \\
+unsigned direction & 0.604 & $+0.000$ & $0$ & --- \\
+\midrule
+random direction, draw 1 & 0.580 & $-0.024$ & $-8$ & --- \\
+random direction, draw 2 & 0.576 & $-0.028$ & $-7$ & --- \\
+random direction, draw 3 & 0.576 & $-0.028$ & $-7$ & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Every arm sits within $\pm 0.015$ of the unsteered baseline
-(Table~\ref{tab:causal4b}), and the same holds at the two smaller scales:
+Table~\ref{tab:causal4b} gives every arm at 4B; Table~\ref{tab:eq} gives
+the primary arm of all three configurations at all three scales, on 336
+questions each. Eight of the nine cells are flatly null.
 
-\begin{center}
-\begin{tabular}{lrrrrr}
-\toprule
-model & questions & cascade AUROC & base acc & reactive $\Delta$ (net, $p$) & negated $\Delta$ \\
-\midrule
-Qwen3-0.6B & 275 & 0.668 & 0.545 & $+0.007$ ($+2$, 0.73) & $+0.018$ \\
-Qwen3-1.7B & 149 & 0.773 & 0.570 & $-0.013$ ($-2$, 0.73) & $-0.013$ \\
-Qwen3-4B   & 336 & 0.836 & 0.580 & $-0.015$ ($-5$, 0.55) & $+0.009$ \\
-\bottomrule
-\end{tabular}
-\end{center}
+\begin{table}[t]
+\centering
+\caption{The primary arm of each configuration, at a common $n{=}336$.
+``Probe'' is the logistic-regression weight vector, ``CAA'' a mean
+difference; ablation removes the model's existing component along the
+direction rather than adding to it. Sample sizes are equal by
+construction, so the columns are comparable.}
+\label{tab:eq}
+\small
+\setlength{\tabcolsep}{4pt}
+\input{causal_table}
+\end{table}
+
+The one cell that is not, $-0.048$ at $p{=}0.020$ for 4B, does not survive
+its own controls. Three \emph{independent random directions}, run at the
+same duty cycle and coefficient, give $-0.024$, $-0.028$ and $-0.028$ on
+the same questions --- and the third of those reaches $p{=}0.039$ by
+itself. Steering along a direction with no relationship to pivotality
+degrades accuracy nearly as much as steering along the signed one, so what
+the arm measures is the perturbation, not the direction. Had we drawn a
+single random control instead of three, the first draw ($p{=}0.302$) would
+have made the signed direction look special.
 
 \textbf{Detection improves monotonically with scale; the intervention does
 nothing at any of them.} This is the cleanest form the negative result
