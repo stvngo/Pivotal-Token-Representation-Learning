@@ -87,6 +87,12 @@ class SteeringStats:
     # positions, so matching an always-on arm on duty cycle alone mismatches
     # the injected energy. With ||h|| recorded the match is exact.
     h_norm: list[np.ndarray] = field(default_factory=list)
+    # The perturbation actually applied at each gated position. Recorded
+    # rather than derived, because the formula is mode-specific --
+    # ||delta|| is |coef|*||h|| under additive_normalized but
+    # |coef-1|*|h.v_hat| under projection, and a reporting path that
+    # hard-codes one of them silently misreports the other.
+    delta_norm: list[np.ndarray] = field(default_factory=list)
 
     @property
     def duty_cycle(self) -> float:
@@ -275,6 +281,7 @@ class CascadeSteeringHook:
         self._step += 1
 
         if not bool(perturb.any()):
+            self.stats.delta_norm.append(np.zeros(h.shape[0], dtype=np.float32))
             return output
 
         mask = perturb.view(-1, 1)
@@ -282,7 +289,9 @@ class CascadeSteeringHook:
         new_hidden = inner(module, args, hidden)
         if isinstance(new_hidden, tuple):
             new_hidden = new_hidden[0]
-        self.stats.energy += float((new_hidden - hidden).float().norm(dim=-1).sum().item())
+        dn = (new_hidden - hidden).float().norm(dim=-1).squeeze(1)
+        self.stats.delta_norm.append(dn.detach().cpu().numpy())
+        self.stats.energy += float(dn.sum().item())
         return (new_hidden,) + tuple(output[1:]) if isinstance(output, tuple) else new_hidden
 
     def __enter__(self) -> "CascadeSteeringHook":

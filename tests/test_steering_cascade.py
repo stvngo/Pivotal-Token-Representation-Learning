@@ -287,3 +287,41 @@ def test_unknown_gate_mode_is_rejected() -> None:
         CascadeSteeringHook(_Stub(), **_hook_kwargs(gate_mode="nope"))
     with pytest.raises(ValueError, match="pattern"):
         CascadeSteeringHook(_Stub(), **_hook_kwargs(gate_mode=MODE_PATTERN))
+
+
+def test_delta_norm_is_recorded_not_derived() -> None:
+    """||delta|| is mode-specific, so the hook records it rather than letting
+    a reporting path re-derive it from the coefficient.
+
+    Under additive_raw with a unit-ish vector the perturbation is coef*||v||;
+    under projection it is |coef-1|*|h.v_hat|. A reporter that hard-codes the
+    additive formula silently misreports every ablation arm.
+    """
+    m = _Stub()
+    x = _decode_step(b=2)
+
+    add = CascadeSteeringHook(m, **_hook_kwargs(coef=2.0, mode="additive_raw"))
+    with add:
+        m(x)
+    expected = 2.0 * float(np.sqrt(D))          # ||2 * ones(D)||
+    assert np.allclose(np.concatenate(add.stats.delta_norm), expected)
+
+    proj = CascadeSteeringHook(m, **_hook_kwargs(coef=0.0, mode="projection"))
+    with proj:
+        m(x)
+    # Ablation removes the component along v_hat, so ||delta|| = |h . v_hat|.
+    h = m(x)[2][:, -1, :]
+    v_hat = torch.ones(D) / np.sqrt(D)
+    assert np.allclose(np.concatenate(proj.stats.delta_norm),
+                       (h @ v_hat).abs().numpy(), atol=1e-4)
+
+
+def test_unperturbed_positions_record_zero_delta() -> None:
+    """Every gated position needs an entry, or trimming misaligns the arrays."""
+    m = _Stub()
+    hook = CascadeSteeringHook(m, **_hook_kwargs(coef=1.0, gate_mode=MODE_OBSERVE))
+    with hook:
+        m(_decode_step(b=3))
+        m(_decode_step(b=3))
+    assert len(hook.stats.delta_norm) == len(hook.stats.perturbed) == 2
+    assert float(np.concatenate(hook.stats.delta_norm).sum()) == 0.0

@@ -61,6 +61,12 @@ from probe_pipeline.steering_reactive import (  # noqa: E402
 )
 
 
+# The coefficient at which each mode leaves the residual stream untouched.
+# Getting this wrong turns the identity check into an ablation check.
+IDENTITY_COEF = {"additive_raw": 0.0, "additive_normalized": 0.0,
+                 "projection": 1.0}
+
+
 def gate_check(npz, atol: float = 2e-2) -> dict:
     """Assert the exported weights still reproduce the probe's own logits.
 
@@ -99,7 +105,8 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
     # generate_batched. Rather than reach inside, run batch by batch here.
     resp, nnew, stats = [], [], []
     p_all, piv_all, help_all, norm_all = [], [], [], []
-    norm_kept = []   # ||h|| at perturbed, non-padding positions
+    delta_all = []
+    norm_kept = []   # ||delta|| at perturbed, non-padding positions
     for i in range(0, len(prompts), batch_size):
         chunk = list(prompts[i:i + batch_size])
         hook = CascadeSteeringHook(model, **hook_kwargs)
@@ -123,8 +130,7 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
                     keep = np.arange(arr.shape[0])[:, None] < np.asarray(k)[None, :]
                 sink.append(arr[keep])
             pert = np.stack(hook.stats.perturbed)
-            norms = np.stack(hook.stats.h_norm)
-            norm_kept.append(norms[keep & pert])
+            norm_kept.append(np.stack(hook.stats.delta_norm)[keep & pert])
         hook.reset()
 
     agg = {
@@ -140,7 +146,7 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
     # made a correctly matched pair look mismatched by 1.9x. In
     # additive_normalized ||delta|| is exactly |coef|*||h||, so this is
     # recoverable from what is already recorded.
-    agg["energy_trimmed"] = abs(hook_kwargs.get("coef", 0.0)) * float(
+    agg["energy_trimmed"] = float(
         np.concatenate(norm_kept).sum() if norm_kept else 0.0
     )
     agg["duty_cycle"] = (agg["n_fired"] + agg["n_held"]) / max(1, agg["n_positions"])
@@ -178,7 +184,8 @@ def main() -> None:
                          "after a detection. A single-token nudge may be too "
                          "transient to change a trajectory.")
     ap.add_argument("--hysteresis", type=int, default=0)
-    ap.add_argument("--stage", default="all", choices=["primary", "all"])
+    ap.add_argument("--stage", default="all",
+                    choices=["primary", "all", "ablation"])
     ap.add_argument("--out", default=None)
     ap.add_argument("--hf-repo", default=None)
     ap.add_argument("--device", default="cuda",
@@ -233,7 +240,8 @@ def main() -> None:
     # -- base, and the observe pass that calibrates every threshold ---------
     print("[1] base + observe", flush=True)
     obs_arm, obs = run(name="base", hook_kwargs=dict(
-        base_kw, vector=v_signed, coef=0.0, gate_mode=MODE_OBSERVE))
+        base_kw, vector=v_signed, coef=IDENTITY_COEF[a.mode],
+        gate_mode=MODE_OBSERVE))
     base_mask = obs_arm.correct_mask
     results["base"] = obs_arm.as_dict()
     p = obs["p_steer"]
@@ -282,7 +290,8 @@ def main() -> None:
     small = prompts[:n_id]
     ident, _ = run_arm(model, tok, small, golds[:n_id], name="identity",
                        max_new_tokens=a.max_new_tokens, batch_size=a.batch_size,
-                       hook_kwargs=dict(base_kw, vector=v_signed, coef=0.0,
+                       hook_kwargs=dict(base_kw, vector=v_signed,
+                                        coef=IDENTITY_COEF[a.mode],
                                         gate_mode=MODE_ALWAYS_ON))
     diff = [i for i, (x, y) in enumerate(zip(ident.correct_mask, base_mask[:n_id]))
             if x != y]
@@ -299,7 +308,8 @@ def main() -> None:
     def record(nm, arm, st, primary=False):
         d = arm.as_dict()
         d.update({k: v for k, v in st.items()
-                  if k not in ("p_steer", "p_pivotal", "p_helpful", "h_norm")})
+                  if k not in ("p_steer", "p_pivotal", "p_helpful",
+                               "h_norm", "delta_norm")})
         d["vs_base"] = mcnemar(base_mask, arm.correct_mask)
         d["delta_acc"] = arm.accuracy - obs_arm.accuracy
         d["primary"] = primary
@@ -309,6 +319,39 @@ def main() -> None:
               f"energy {st.get('energy_trimmed', 0):.0f}  "
               f"net {d['vs_base']['net']:+d}  p {d['vs_base']['p']:.3f}", flush=True)
         return d
+
+    if a.stage == "ablation":
+        # A different causal question from the additive arms. Adding a
+        # direction asks whether it can be injected; removing the model's
+        # existing component along it asks whether the model *uses* it. The
+        # earlier NIE work in this project found its clearest signal in
+        # ablation (-0.516 for the CAA direction against +-0.008 for the
+        # additive probe direction), and running only additive arms left the
+        # more informative test undone.
+        #
+        # Matching is by duty cycle, not energy: ablation has no injected
+        # magnitude to match, so the control that isolates *where* is the
+        # same number of ablations at random positions.
+        print("[3] ablation (projection mode)", flush=True)
+        for nm, coef, gm, vec, extra in [
+            ("ablate_reactive", 0.0, MODE_REACTIVE, v_signed, {}),
+            ("ablate_always_on", 0.0, MODE_ALWAYS_ON, v_signed, {}),
+            ("ablate_random_placement", 0.0, MODE_PATTERN, v_signed, {}),
+            ("ablate_random_direction", 0.0, MODE_REACTIVE, v_random, {}),
+            ("ablate_unsigned_direction", 0.0, MODE_REACTIVE, v_unsigned, {}),
+            ("amplify_reactive", 2.0, MODE_REACTIVE, v_signed, {}),
+            ("amplify_always_on", 2.0, MODE_ALWAYS_ON, v_signed, {}),
+        ]:
+            kw = dict(base_kw, vector=vec, coef=coef, gate_mode=gm, **extra)
+            if gm == MODE_REACTIVE:
+                kw["threshold"] = thresh(a.rate)
+            elif gm == MODE_PATTERN:
+                kw["pattern"] = build_random_pattern(
+                    a.max_new_tokens, a.batch_size, a.rate)
+            arm, st = run(name=nm, hook_kwargs=kw)
+            record(nm, arm, st, primary=(nm == "ablate_reactive"))
+        _finish(a, results, t0, results["ablate_reactive"])
+        return
 
     # -- primary -----------------------------------------------------------
     print(f"[3] primary: reactive rate={a.rate} alpha={a.alpha}", flush=True)
