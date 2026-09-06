@@ -1,0 +1,256 @@
+{
+  "_path": "pooled",
+  "_meta": {
+    "model": "Qwen/Qwen3-4B (pooled)",
+    "probes": "artifacts/steering/qwen3-4b.npz",
+    "band": "/content/band_Qwen3-4B_train3000.json",
+    "mode": "additive_normalized",
+    "primary_alpha": 0.05,
+    "primary_rate": 0.05,
+    "hysteresis": 0,
+    "seconds": 2321.6,
+    "primary_arm": "reactive",
+    "primary_result": {
+      "delta_acc": -0.03375527426160341,
+      "p": 0.20048842206597328
+    }
+  },
+  "base": {
+    "accuracy": 0.6041666666666666,
+    "n": 336,
+    "n_correct": 203
+  },
+  "observe": {
+    "n_decode_positions": 120176
+  },
+  "identity_check": {
+    "passed": true,
+    "n": 64,
+    "n_mismatched": 0
+  },
+  "dose_alpha_0.1": {
+    "accuracy": 0.5744047619047619,
+    "n": 336,
+    "n_correct": 193,
+    "delta_acc": -0.029761904761904767,
+    "duty_cycle_trimmed": 0.052881358092214004,
+    "energy_trimmed": 59142.159765625,
+    "primary": false,
+    "vs_base": {
+      "gained": 19,
+      "lost": 29,
+      "net": -10,
+      "p": 0.19341265286193732
+    }
+  },
+  "random_placement_matched": {
+    "accuracy": 0.5684523809523809,
+    "n": 336,
+    "n_correct": 191,
+    "delta_acc": -0.0357142857142857,
+    "duty_cycle_trimmed": 0.05351362653808003,
+    "energy_trimmed": 21432.6650390625,
+    "primary": false,
+    "vs_base": {
+      "gained": 21,
+      "lost": 33,
+      "net": -12,
+      "p": 0.13367423536410528
+    }
+  },
+  "dose_hysteresis_4": {
+    "accuracy": 0.5358649789029536,
+    "n": 237,
+    "n_correct": 127,
+    "delta_acc": -0.06830168776371304,
+    "duty_cycle_trimmed": 0.16135674655379512,
+    "energy_trimmed": 50903.74375,
+    "primary": false,
+    "vs_base": {
+      "gained": 14,
+      "lost": 26,
+      "net": -12,
+      "p": 0.0806904677519924
+    }
+  },
+  "sign_flipped": {
+    "accuracy": 0.5952380952380952,
+    "n": 336,
+    "n_correct": 200,
+    "delta_acc": -0.008928571428571397,
+    "duty_cycle_trimmed": 0.0502474410679514,
+    "energy_trimmed": 26612.01181640625,
+    "primary": false,
+    "vs_base": {
+      "gained": 16,
+      "lost": 19,
+      "net": -3,
+      "p": 0.7358788008568808
+    }
+  },
+  "always_on_matched_energy": {
+    "accuracy": 0.5684523809523809,
+    "n": 336,
+    "n_correct": 191,
+    "delta_acc": -0.0357142857142857,
+    "duty_cycle_trimmed": 1.0,
+    "energy_trimmed": 27693.933454359696,
+    "primary": false,
+    "vs_base": {
+      "gained": 16,
+      "lost": 28,
+      "net": -12,
+      "p": 0.09614175442061423
+    }
+  },
+  "dose_alpha_0.02": {
+    "accuracy": 0.5654761904761905,
+    "n": 336,
+    "n_correct": 190,
+    "delta_acc": -0.038690476190476164,
+    "duty_cycle_trimmed": 0.05045933411888581,
+    "energy_trimmed": 10788.26634765625,
+    "primary": false,
+    "vs_base": {
+      "gained": 14,
+      "lost": 27,
+      "net": -13,
+      "p": 0.05958388801809633
+    }
+  },
+  "dose_rate_0.02": {
+    "accuracy": 0.5714285714285714,
+    "n": 336,
+    "n_correct": 192,
+    "delta_acc": -0.03273809523809523,
+    "duty_cycle_trimmed": 0.019988760351546345,
+    "energy_trimmed": 15648.4189453125,
+    "primary": false,
+    "vs_base": {
+      "gained": 11,
+      "lost": 22,
+      "net": -11,
+      "p": 0.08014331245794892
+    }
+  },
+  "random_direction_1": {
+    "accuracy": 0.5757575757575758,
+    "n": 99,
+    "n_correct": 57,
+    "delta_acc": -0.02840909090909083,
+    "duty_cycle_trimmed": 0.05173954400023059,
+    "energy_trimmed": 7614.1044921875,
+    "primary": false,
+    "vs_base": {
+      "gained": 3,
+      "lost": 10,
+      "net": -7,
+      "p": 0.09228515625
+    }
+  },
+  "reactive": {
+    "accuracy": 0.5565476190476191,
+    "n": 336,
+    "n_correct": 187,
+    "delta_acc": -0.04761904761904756,
+    "duty_cycle_trimmed": 0.051838035523255124,
+    "energy_trimmed": 27855.6431640625,
+    "primary": true,
+    "vs_base": {
+      "gained": 13,
+      "lost": 29,
+      "net": -16,
+      "p": 0.019520472782460274
+    }
+  },
+  "unsigned_direction": {
+    "accuracy": 0.6041666666666666,
+    "n": 336,
+    "n_correct": 203,
+    "delta_acc": 0.0,
+    "duty_cycle_trimmed": 0.048935708720705975,
+    "energy_trimmed": 26454.15732421875,
+    "primary": false,
+    "vs_base": {
+      "gained": 21,
+      "lost": 21,
+      "net": 0,
+      "p": 1.0
+    }
+  },
+  "random_direction_2": {
+    "accuracy": 0.5757575757575758,
+    "n": 99,
+    "n_correct": 57,
+    "delta_acc": -0.02840909090909083,
+    "duty_cycle_trimmed": 0.051606849636406285,
+    "energy_trimmed": 7468.96826171875,
+    "primary": false,
+    "vs_base": {
+      "gained": 1,
+      "lost": 8,
+      "net": -7,
+      "p": 0.0390625
+    }
+  },
+  "dose_alpha_0.2": {
+    "accuracy": 0.5744047619047619,
+    "n": 336,
+    "n_correct": 193,
+    "delta_acc": -0.029761904761904767,
+    "duty_cycle_trimmed": 0.056188054862488526,
+    "energy_trimmed": 117763.66875000001,
+    "primary": false,
+    "vs_base": {
+      "gained": 31,
+      "lost": 41,
+      "net": -10,
+      "p": 0.28878428041410487
+    }
+  },
+  "dose_rate_0.1": {
+    "accuracy": 0.5357142857142857,
+    "n": 336,
+    "n_correct": 180,
+    "delta_acc": -0.06845238095238093,
+    "duty_cycle_trimmed": 0.10270761745127609,
+    "energy_trimmed": 47488.369921875004,
+    "primary": false,
+    "vs_base": {
+      "gained": 14,
+      "lost": 37,
+      "net": -23,
+      "p": 0.0017691971837869858
+    }
+  },
+  "unsigned_gate": {
+    "accuracy": 0.5714285714285714,
+    "n": 336,
+    "n_correct": 192,
+    "delta_acc": -0.03273809523809523,
+    "duty_cycle_trimmed": 0.049290979457238114,
+    "energy_trimmed": 26654.3212890625,
+    "primary": false,
+    "vs_base": {
+      "gained": 13,
+      "lost": 24,
+      "net": -11,
+      "p": 0.09887174959294498
+    }
+  },
+  "random_direction": {
+    "accuracy": 0.5803571428571429,
+    "n": 336,
+    "n_correct": 195,
+    "delta_acc": -0.023809523809523725,
+    "duty_cycle_trimmed": 0.05093561478629021,
+    "energy_trimmed": 27649.72978515625,
+    "primary": false,
+    "vs_base": {
+      "gained": 19,
+      "lost": 27,
+      "net": -8,
+      "p": 0.3019956131896606
+    }
+  }
+}

@@ -237,6 +237,21 @@ the shell running it has that string in its own command line. It also
 silently hides a job that never launched. Match on `venv/bin/python.*<script>`
 or poll the output file for a sentinel string instead.
 
+**A 99-question causal run cannot resolve anything, and we have the
+replication to prove it.** The 4B additive test half was run twice on the
+same 99 questions with the same model, probe and intervention: once on a
+vLLM-modified session (base 0.5657, reactive **+0.030**, net +3) and once
+on a clean one (base 0.6465, reactive **-0.081**, net -8). The measured
+effect swung by 0.111 -- larger than any effect in the study. Part is the
+torch build, but most is that ~15 discordant pairs resolve nothing.
+
+Consequence: which half you pool decides the headline. Pooling train with
+the clean test half gives -0.048 at p=0.020; with the vLLM half, -0.015 at
+p=0.551. **Do not report either as a finding.** Every control moves with
+it (always-on -0.036, random placement -0.036, unsigned gate -0.033), so
+even at face value it says "perturbing degrades output", not "gating
+works".
+
 **Installing vLLM changes greedy generation.** It upgrades torch to
 2.13.0+cu130 and reinstalls torchvision, and a clean session and a
 vLLM-modified one differ by 8 of 99 answers on the same questions. Two
