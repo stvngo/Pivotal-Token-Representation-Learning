@@ -14,6 +14,14 @@ the model always or never solves has no pivotal token. Restricting the
 causal evaluation to that same band is therefore not cherry-picking, it is
 matching the evaluation population to the data-generating process.
 
+``--backend vllm`` is the fast path and the default choice for the upper
+scales: screening is pure generation with no hooks, so there is no reason
+to pay HuggingFace's decode loop for it. vLLM and HF sample slightly
+differently, which is acceptable here precisely because the screen is an
+independent estimate of question difficulty rather than the metric being
+compared -- it decides *which* questions are evaluated, not how any arm
+scores on them.
+
 The screen must be independent of the arms it will be used to compare.
 Selecting on whether the *base arm* got a question right would condition on
 a random outcome, and regression to the mean would then make any
@@ -59,10 +67,13 @@ def main() -> None:
                          "remainder is unseen by both the search and the probes.")
     ap.add_argument("--out", default=None)
     ap.add_argument("--hf-repo", default=None)
+    ap.add_argument("--backend", default="hf", choices=["hf", "vllm"])
+    ap.add_argument("--max-model-len", type=int, default=1536)
+    ap.add_argument("--gpu-memory-utilization", type=float, default=0.90)
     a = ap.parse_args()
 
     from datasets import load_dataset
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(a.model)
     ds = load_dataset("openai/gsm8k", "main", split=a.split)
@@ -73,23 +84,51 @@ def main() -> None:
     prompts = build_prompts(questions, tok)
 
     print(f"[1/2] {a.model} | screening {len(prompts)} questions "
-          f"x {a.rollouts} rollouts", flush=True)
-    model = AutoModelForCausalLM.from_pretrained(a.model, dtype=torch.bfloat16).to("cuda").eval()
+          f"x {a.rollouts} rollouts | backend={a.backend}", flush=True)
 
     t0 = time.time()
     n_success = [0] * len(prompts)
-    for k in range(a.rollouts):
-        resp, _ = generate_batched(
-            model, tok, prompts, greedy=False, seed=1000 + k,
-            temperature=a.temperature, max_new_tokens=a.max_new_tokens,
-            batch_size=a.batch_size,
+
+    if a.backend == "vllm":
+        from pts_harness.backends.base import RolloutRequest
+        from pts_harness.backends.vllm import VLLMRolloutBackend
+
+        backend = VLLMRolloutBackend(
+            a.model, dtype="bfloat16", max_model_len=a.max_model_len,
+            gpu_memory_utilization=a.gpu_memory_utilization, seed=1000,
         )
-        for i, (r, g) in enumerate(zip(resp, golds)):
-            n_success[i] += int(is_correct(extract_answer(r), g))
-        done = sum(1 for s in n_success
-                   if a.min_prob <= s / (k + 1) <= a.max_prob)
-        print(f"  rollout {k+1}/{a.rollouts}  in-band so far {done}  "
-              f"({time.time()-t0:.0f}s)", flush=True)
+        reqs = [
+            RolloutRequest(
+                request_id=str(i),
+                prompt_token_ids=tuple(tok.encode(pr, add_special_tokens=False)),
+                n=a.rollouts, seed=1000 + i,
+                max_new_tokens=a.max_new_tokens, temperature=a.temperature,
+            )
+            for i, pr in enumerate(prompts)
+        ]
+        for res in backend.generate(reqs):
+            i = int(res.request_id)
+            n_success[i] = sum(int(is_correct(extract_answer(r.text), golds[i]))
+                               for r in res.rollouts)
+        print(f"  all {a.rollouts} rollouts done ({time.time()-t0:.0f}s)", flush=True)
+        backend.close()
+    else:
+        from transformers import AutoModelForCausalLM
+
+        model = AutoModelForCausalLM.from_pretrained(
+            a.model, dtype=torch.bfloat16).to("cuda").eval()
+        for k in range(a.rollouts):
+            resp, _ = generate_batched(
+                model, tok, prompts, greedy=False, seed=1000 + k,
+                temperature=a.temperature, max_new_tokens=a.max_new_tokens,
+                batch_size=a.batch_size,
+            )
+            for i, (r, g) in enumerate(zip(resp, golds)):
+                n_success[i] += int(is_correct(extract_answer(r), g))
+            done = sum(1 for s in n_success
+                       if a.min_prob <= s / (k + 1) <= a.max_prob)
+            print(f"  rollout {k+1}/{a.rollouts}  in-band so far {done}  "
+                  f"({time.time()-t0:.0f}s)", flush=True)
 
     p_hat = [s / a.rollouts for s in n_success]
     band = [lo + i for i, p in enumerate(p_hat) if a.min_prob <= p <= a.max_prob]
@@ -98,6 +137,7 @@ def main() -> None:
         "model": a.model, "split": a.split, "offset": a.offset,
         "n_screened": len(prompts),
         "rollouts": a.rollouts, "min_prob": a.min_prob, "max_prob": a.max_prob,
+        "backend": a.backend,
         "seconds": round(time.time() - t0, 1),
         "mean_success": sum(p_hat) / len(p_hat),
         "n_in_band": len(band),
