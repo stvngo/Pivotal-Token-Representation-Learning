@@ -268,6 +268,22 @@ def main() -> None:
         run_seed=args.seed,
     )
 
+    # Bisection conditions on ever-longer prefixes of a rollout, so the
+    # context at a deep node is prompt + (up to) a whole rollout, and we then
+    # ask for max_new_tokens more. A window sized for one rollout is
+    # therefore too small by roughly max_new_tokens, and the failure is
+    # quiet: vLLM rejects the individual request, that probability estimate
+    # is lost, and the search carries on around the hole.
+    if args.backend == "vllm":
+        longest_prompt = max((len(s.prompt_token_ids) for s in specs), default=0)
+        needed = longest_prompt + 2 * args.max_new_tokens
+        if args.max_model_len < needed:
+            print(f"[warn] --max-model-len {args.max_model_len} is below the "
+                  f"{needed} a deep bisection node can require "
+                  f"(longest prompt {longest_prompt} + 2 x {args.max_new_tokens}). "
+                  f"Raising it to {needed}.", flush=True)
+            args.max_model_len = needed
+
     print(f"[2/3] backend={args.backend} model={args.model}")
     backend = make_backend(args, tokenizer)
     oracle = MathOracle(answers) if args.task == "math" else GSM8KOracle(answers)
