@@ -24,7 +24,8 @@ ARMS = [
     ("always_on_matched_energy", "always-on, matched energy"),
     ("random_placement_matched", "random placement, matched duty"),
     ("sign_flipped", "coefficient negated"),
-    ("unsigned_direction", "unsigned direction"),
+    ("unsigned_direction", "contrast: unsigned direction"),
+    ("signed_direction", "contrast: signed direction"),
     ("unsigned_gate", "gate on $P(\\text{pivotal})$ only"),
     ("random_direction", "random direction"),
 ]

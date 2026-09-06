@@ -260,8 +260,14 @@ def main() -> None:
         "signed_probe": "v_signed_probe", "unsigned_probe": "v_unsigned_probe",
     }[a.direction]]
     v_signed = v_primary
-    v_unsigned = npz["v_unsigned" if a.direction.startswith("signed")
-                     else "v_signed"]
+    contrast_name = "v_unsigned" if a.direction.startswith("signed") else "v_signed"
+    v_unsigned = npz[contrast_name]
+    # Key the contrast arm by the direction it actually uses. Naming it
+    # "unsigned_direction" unconditionally was wrong the moment the primary
+    # became unsigned, and it is the kind of error that survives into a
+    # results table unnoticed.
+    contrast_key = ("unsigned_direction" if contrast_name == "v_unsigned"
+                    else "signed_direction")
     # Several independent draws, not one. A single random vector has real
     # variance, and this project has already been caught reporting one draw
     # as if it were a null distribution (the AUROC control averaged eight
@@ -381,7 +387,7 @@ def main() -> None:
             ("ablate_random_placement", 0.0, MODE_PATTERN, v_signed, {}),
             *[(f"ablate_random_direction{'' if j == 0 else f'_{j}'}",
                0.0, MODE_REACTIVE, vr, {}) for j, vr in enumerate(v_randoms)],
-            ("ablate_unsigned_direction", 0.0, MODE_REACTIVE, v_unsigned, {}),
+            (f"ablate_{contrast_key}", 0.0, MODE_REACTIVE, v_unsigned, {}),
             ("amplify_reactive", 2.0, MODE_REACTIVE, v_signed, {}),
             ("amplify_always_on", 2.0, MODE_ALWAYS_ON, v_signed, {}),
             # The always-on arms are ~20x the perturbation of the gated ones,
@@ -391,8 +397,8 @@ def main() -> None:
             # component up hurts more than scaling it down.
             ("ablate_always_on_random", 0.0, MODE_ALWAYS_ON, v_random, {}),
             ("amplify_always_on_random", 2.0, MODE_ALWAYS_ON, v_random, {}),
-            ("ablate_always_on_unsigned", 0.0, MODE_ALWAYS_ON, v_unsigned, {}),
-            ("amplify_always_on_unsigned", 2.0, MODE_ALWAYS_ON, v_unsigned, {}),
+            (f"ablate_always_on_{contrast_key}", 0.0, MODE_ALWAYS_ON, v_unsigned, {}),
+            (f"amplify_always_on_{contrast_key}", 2.0, MODE_ALWAYS_ON, v_unsigned, {}),
         ]:
             kw = dict(base_kw, vector=vec, coef=coef, gate_mode=gm, **extra)
             if gm == MODE_REACTIVE:
@@ -448,7 +454,7 @@ def main() -> None:
     arm, st = run(name="other_dir", hook_kwargs=dict(
         base_kw, vector=v_unsigned, coef=a.alpha,
         gate_mode=MODE_REACTIVE, threshold=thresh(a.rate)))
-    record("unsigned_direction", arm, st)
+    record(contrast_key, arm, st)
 
     for j, vr in enumerate(v_randoms):
         arm, st = run(name=f"random_dir{j}", hook_kwargs=dict(
@@ -493,6 +499,7 @@ def _finish(a, results, t0, prim) -> None:
     results["_meta"] = {
         "model": a.model, "probes": a.probes, "band": a.band,
         "gate": a.gate, "direction": a.direction, "stage": a.stage,
+        "contrast_direction": contrast_name,
         "mode": a.mode, "primary_alpha": a.alpha, "primary_rate": a.rate,
         "hysteresis": a.hysteresis, "seconds": round(time.time() - t0, 1),
         "primary_arm": "reactive",
