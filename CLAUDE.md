@@ -66,11 +66,35 @@ Published (private, under `stvngo/`): `Qwen3-{0.6B,1.7B,4B}-pts-tokens`
 and `Qwen3-{0.6B,1.7B,4B}-pivotal-activations`. Run state mirrors to
 `stvngo/ptrl-runs`.
 
-**Phase 6 (causal validation) is in flight.** The rebuilt GSM8K evaluator
-clears its gate decisively -- greedy accuracy 0.567 / 0.817 / 0.940 for
-0.6B / 1.7B / 4B against the v1 harness's 0.16-0.20, so the four v1
-confounds (no chat template, 256-token truncation, a parser reading the
-prompt, per-arm seeding) accounted for essentially the whole gap.
+**Phase 6 (causal validation) is done, and the result is negative.**
+The rebuilt GSM8K evaluator clears its gate decisively -- greedy accuracy
+0.567 / 0.817 / 0.940 for 0.6B / 1.7B / 4B against the v1 harness's
+0.16-0.20, so the four v1 confounds (no chat template, 256-token
+truncation, a parser reading the prompt, per-arm seeding) accounted for
+essentially the whole gap.
+
+Gating an additive nudge along `mu_helpful - mu_harmful` on the cascade
+probe moves GSM8K accuracy by **-0.015 at 4B** (336 in-band questions,
+net -5, p=0.55), with every control indistinguishable, and the same null
+at 0.6B (+0.007) and 1.7B (-0.013).
+
+**The detector is not what fails.** At the steering layer the cascade
+identifies harmful pivots at **0.668 / 0.773 / 0.836** AUROC (base rate
+~0.20) -- monotone in scale -- while the intervention does nothing at any
+scale. The gap is in *acting* on the representation, not reading it.
+
+Three reasons this is a null and not a small effect, none a p-value:
+the **sign-flipped arm matches or beats the primary at all three scales**
+(a direction with causal polarity cannot); the **two disjoint halves of
+the 4B band disagree in sign on every arm** (primary +0.030 vs -0.034,
+always-on +0.071 vs -0.025); and the dose-response is non-monotone at 4B,
+while at 1.7B it is ordered *downward* in both amount and fire rate, i.e.
+damage accumulating with perturbation size regardless of direction.
+
+Resolution is ~±0.02 accuracy at n=336, so a smaller real effect would be
+invisible. Untested: span-level perturbation (our hysteresis arm reached
+only 16% duty), acting on attention/MLP outputs, and steering toward a
+target representation rather than along a difference of means.
 
 But 0.940 at 4B leaves 18 questions to move, and 4B is the *only* scale
 where the signed probe is validated. So the intervention is evaluated on
