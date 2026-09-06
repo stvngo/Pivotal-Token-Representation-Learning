@@ -268,6 +268,7 @@ def main() -> None:
     # results table unnoticed.
     contrast_key = ("unsigned_direction" if contrast_name == "v_unsigned"
                     else "signed_direction")
+    a.contrast_direction = contrast_name      # _finish cannot see this scope
     # Several independent draws, not one. A single random vector has real
     # variance, and this project has already been caught reporting one draw
     # as if it were a null distribution (the AUROC control averaged eight
@@ -365,6 +366,7 @@ def main() -> None:
         d["delta_acc"] = arm.accuracy - obs_arm.accuracy
         d["primary"] = primary
         results[nm] = d
+        _save(a, results)
         print(f"    {nm:<24} acc {arm.accuracy:.4f} ({d['delta_acc']:+.4f})  "
               f"duty {st.get('duty_cycle_trimmed', 0):.3f}  "
               f"energy {st.get('energy_trimmed', 0):.0f}  "
@@ -498,18 +500,30 @@ def main() -> None:
     _finish(a, results, t0, prim)
 
 
+def _save(a, results) -> Path:
+    """Checkpoint after every arm.
+
+    A run is an hour of GPU and previously persisted only on the final line,
+    so a crash in the summary code -- or a reclaimed VM -- threw away every
+    completed arm. Writing as we go costs nothing and means a failure loses
+    at most the arm in flight.
+    """
+    out = Path(a.out or f"/content/steer_{a.model.split('/')[-1]}.json")
+    out.write_text(json.dumps(results, indent=2, default=float))
+    return out
+
+
 def _finish(a, results, t0, prim) -> None:
     results["_meta"] = {
         "model": a.model, "probes": a.probes, "band": a.band,
         "gate": a.gate, "direction": a.direction, "stage": a.stage,
-        "contrast_direction": contrast_name,
+        "contrast_direction": getattr(a, "contrast_direction", None),
         "mode": a.mode, "primary_alpha": a.alpha, "primary_rate": a.rate,
         "hysteresis": a.hysteresis, "seconds": round(time.time() - t0, 1),
         "primary_arm": "reactive",
         "primary_result": {"delta_acc": prim["delta_acc"], "p": prim["vs_base"]["p"]},
     }
-    out = Path(a.out or f"/content/steer_{a.model.split('/')[-1]}.json")
-    out.write_text(json.dumps(results, indent=2, default=float))
+    out = _save(a, results)
     print(f"\nwrote {out}", flush=True)
     if a.hf_repo:
         try:
