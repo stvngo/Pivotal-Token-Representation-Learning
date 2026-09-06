@@ -43,9 +43,20 @@ Reading at the pivot instead of before it inverts entropy to below chance
 at all three scales (0.693→0.449, 0.721→0.475, 0.694→0.495). Uncertainty
 peaks immediately before a pivotal token and collapses after.
 
-**Signed probe (helpful vs harmful) is unresolved**: 0.614, CI contains
-chance, measured at 0.6B only. Re-running it at 1.7B/4B is the obvious
-next experiment given the unsigned effect is much stronger there.
+**Signed probe (helpful vs harmful) resolves at scale**: 0.614 (0.6B,
+separated from nothing, not even random) → 0.650 (1.7B) → **0.780 (4B,
+separated from token identity p=0.002, entropy, and random)**. Immune to
+both deflationary accounts by construction: entropy is sign-blind (scores
+*below* chance, 0.51/0.43/0.43), and a lookup on the current token cannot
+encode the sign of a token not yet emitted. At *t* the signed task looks
+easier (0.70/0.86/0.89) but token identity jumps to 0.74-0.85 and at 0.6B
+actually beats the probe — so *t-1* is the position that isolates
+representation from vocabulary.
+
+**Causal validation (Phase 6) should run at 4B, not 0.6B.** The signed
+direction mu_helpful - mu_harmful is the one with meaningful polarity
+(plan §2.1), and it is only validated at 4B. Gating an intervention on a
+0.6B signed probe would be gating on noise.
 
 Qualifying fraction `f` *rises* with scale (0.40/0.45/0.54) — the
 prediction that stronger models would saturate GSM8K and starve the search

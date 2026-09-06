@@ -78,6 +78,12 @@ def main() -> None:
     ap.add_argument("--C", type=float, default=None)
     ap.add_argument("--c-grid", default="0.0001,0.001,0.01,0.1,1.0")
     ap.add_argument("--n-boot", type=int, default=4000)
+    ap.add_argument("--signed", action="store_true",
+                    help="the signed task: pivotal rows only, helpful vs harmful. "
+                         "Entropy is sign-blind by construction, so a result here "
+                         "cannot be explained by uncertainty.")
+    ap.add_argument("--dead-zone", type=float, default=0.0,
+                    help="drop pivotal rows with |prob_delta| <= this")
     ap.add_argument("--label", default="", help="name for this dataset in the output")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
@@ -86,36 +92,55 @@ def main() -> None:
     tr = ActivationStoreV2.open(acts / f"{a.tag}_train.safetensors")
     te = ActivationStoreV2.open(acts / f"{a.tag}_test.safetensors")
     g_tr, g_te = qgroups(tr), qgroups(te)
-    ytr = tr.xy(tr.layers[0])[1]
-    yte = te.xy(te.layers[0])[1]
+
+    if a.signed:
+        # Restrict to pivotal rows and relabel by the sign of the shift.
+        # Groups must be subset in the same row order signed_xy uses.
+        m_tr = (tr.labels() > 0) & (np.abs(tr.prob_delta()) > a.dead_zone)
+        m_te = (te.labels() > 0) & (np.abs(te.prob_delta()) > a.dead_zone)
+        g_tr, g_te = g_tr[m_tr], g_te[m_te]
+        ytr = tr.signed_xy(tr.layers[0], dead_zone=a.dead_zone)[1]
+        yte = te.signed_xy(te.layers[0], dead_zone=a.dead_zone)[1]
+        tok_tr, tok_te = tr.token_ids()[m_tr], te.token_ids()[m_te]
+        unc_te = {k: v[m_te] for k, v in te.uncertainty().items()}
+        get_tr = lambda L: tr.signed_xy(L, dead_zone=a.dead_zone)[0]  # noqa: E731
+        get_te = lambda L: te.signed_xy(L, dead_zone=a.dead_zone)[0]  # noqa: E731
+    else:
+        ytr = tr.xy(tr.layers[0])[1]
+        yte = te.xy(te.layers[0])[1]
+        tok_tr, tok_te = tr.token_ids(), te.token_ids()
+        unc_te = te.uncertainty()
+        get_tr = lambda L: tr.xy(L)[0]  # noqa: E731
+        get_te = lambda L: te.xy(L)[0]  # noqa: E731
 
     if a.layer is None or a.C is None:
         L, C = select(
-            {L: tr.xy(L)[0] for L in tr.layers}, ytr, g_tr,
+            {L: get_tr(L) for L in tr.layers}, ytr, g_tr,
             [float(c) for c in a.c_grid.split(",")],
         )
     else:
         L, C = a.layer, a.C
 
-    probe = fit_probe(tr.xy(L)[0], ytr, C=C, seed=0)
-    xte = te.xy(L)[0]
+    xtr = get_tr(L)
+    probe = fit_probe(xtr, ytr, C=C, seed=0)
+    xte = get_te(L)
     s_probe = probe.decision(xte)
-    unc = te.uncertainty()
-    v_caa = mean_diff_direction(tr.xy(L)[0], ytr)
+    v_caa = mean_diff_direction(xtr, ytr)
 
     baselines = {
-        "token_identity_freq": token_identity_scores(tr.token_ids(), ytr, te.token_ids()),
-        "token_identity_lr": token_onehot_probe_scores(tr.token_ids(), ytr, te.token_ids()),
-        "entropy": unc["entropy"],
-        "neg_margin": -unc["margin"],
-        "neg_top1_prob": -unc["top1_prob"],
+        "token_identity_freq": token_identity_scores(tok_tr, ytr, tok_te),
+        "token_identity_lr": token_onehot_probe_scores(tok_tr, ytr, tok_te),
+        "entropy": unc_te["entropy"],
+        "neg_margin": -unc_te["margin"],
+        "neg_top1_prob": -unc_te["top1_prob"],
         "caa_direction": xte @ v_caa,
-        "random_direction": random_direction_scores(xte, seed=0, n_directions=8),
+        "random_direction": random_direction_scores(xte, seed=0),
     }
 
-    head = a.label or str(acts)
+    head = (a.label or str(acts)) + (" [SIGNED: helpful vs harmful]" if a.signed else "")
     print(f"\n=== {head} ===")
-    print(f"layer {L}, C={C} | {len(yte)} rows from {len(set(g_te))} questions")
+    print(f"layer {L}, C={C} | {len(yte)} rows from {len(set(g_te))} questions"
+          + (f" | positive rate {yte.mean():.3f}" if a.signed else ""))
     print(f"probe AUROC = {roc_auc_score(yte, s_probe):.4f}\n")
     print(f"{'baseline':<20} {'AUROC':>7} {'probe-base':>11} {'95% CI':>18} {'P(<=0)':>8}")
 

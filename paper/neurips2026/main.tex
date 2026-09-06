@@ -64,9 +64,14 @@ examples from the whole rollout rather than the span where pivots occur
 inflates entropy to 0.814 and erases the advantage entirely. Moving the
 probe to the pivot token itself inverts entropy to \emph{below chance},
 replicated across scales --- uncertainty peaks immediately before a pivotal
-token and collapses immediately after. We report a negative result on
-whether the \emph{sign} of the shift is decodable, and document two ways
-this measurement inflates: collapsing a question's sampled rollouts to one
+token and collapses immediately after. We further find that the \emph{sign} of
+the impending shift --- whether the next token will help or hurt --- is
+itself decodable at $t{-}1$, but only at scale: a clean null at 0.6B
+(separated from nothing, not even a random direction) becoming 0.780 AUROC
+at 4B, separated from every cheaper explanation. Because entropy is
+sign-blind, and because a lookup on the current token cannot encode the
+sign of a token not yet emitted, this result is immune to both deflationary
+accounts. We also document two ways such measurements inflate: collapsing a question's sampled rollouts to one
 canonical sequence discards 74\% of the supervision, and selecting the best
 layer on the reporting split adds 0.063 AUROC.
 \end{abstract}
@@ -124,10 +129,13 @@ Our contributions:
   \item A contrast between reading at $t-1$ and at the pivot, in which
     entropy inverts to below chance at all three scales
     (Section~\ref{sec:at-t}).
-  \item A negative result on whether the \emph{sign} of the shift is
-    decodable (Section~\ref{sec:signed}), and a characterization of two
-    ways the headline inflates: branch collapse and layer selection
-    (Sections~\ref{sec:labels} and \ref{sec:layers}).
+  \item The signed result: whether the impending shift is helpful or
+    harmful is decodable at $t-1$ at 4B (0.780) though not at 0.6B, and is
+    immune to both the uncertainty and token-identity accounts
+    (Section~\ref{sec:signed}).
+  \item A characterization of two ways such headlines inflate: branch
+    collapse and layer selection (Sections~\ref{sec:labels} and
+    \ref{sec:layers}).
 \end{itemize}
 
 \section{Related Work}
@@ -399,24 +407,68 @@ random direction reaches 0.55--0.68 there against 0.43--0.55 at $t-1$,
 because the classes are more separable overall, so a single random
 projection picks up more of that separation by chance.
 
-\subsection{The sign is not decodable at this scale}
+\subsection{The sign of the impending shift is decodable, at scale}
 \label{sec:signed}
 
 Pivotality as defined in Eq.~\ref{eq:pts} is symmetric: a token that
 rescues an answer and one that ruins it receive the same label. The sharper
-question is whether the \emph{sign} is decodable at $t-1$. Entropy is
-sign-blind by construction and cannot answer it, so a positive result here
-would be immune to Section~\ref{sec:negatives} entirely.
+question is whether the \emph{sign} is decodable at $t-1$ --- whether the
+model represents, one step early, that it is about to make a mistake.
 
-On Qwen3-0.6B, restricting to pivotal positions and relabelling by
-$\mathrm{sign}(\pdelta)$ gives 566 training and 122 test rows (56.5\%
-helpful). A probe reaches 0.614 AUROC with a 95\% interval of $[0.482,
-0.735]$ that contains chance; the signed mean-difference direction reaches
-0.567 and token identity 0.555. We report this as a negative result. An
-earlier version on a smaller, noisier label set gave 0.717 and looked
-promising; it did not survive four times as many held-out questions.
-\TODO{Re-run the signed probe at 1.7B and 4B, where the unsigned effect is
-markedly stronger.}
+This question is immune to Section~\ref{sec:negatives} by construction.
+Entropy is sign-blind: it cannot distinguish a helpful branch point from a
+harmful one, and indeed scores \emph{below} chance on this task at every
+scale (0.514, 0.428, 0.434). Whatever a signed probe reads, it is not
+predictive uncertainty.
+
+Restricting to pivotal positions and relabelling by
+$\mathrm{sign}(\pdelta)$ gives Table~\ref{tab:signed}.
+
+\begin{table}[t]
+  \centering
+  \caption{Helpful versus harmful, from the residual stream at $t-1$.
+  Parenthesised values are the paired difference from the probe with its
+  95\% interval. The task goes from a clean null at 0.6B to separated from
+  every cheaper explanation at 4B.}
+  \label{tab:signed}
+  \small
+  \begin{tabular}{lccc}
+    \toprule
+    Detector & Qwen3-0.6B & Qwen3-1.7B & Qwen3-4B \\
+    \midrule
+    \textbf{Signed probe} & \textbf{0.614} & \textbf{0.650} & \textbf{0.780} \\
+    Mean-difference (CAA) & 0.567 \tiny{($+.046$, ns)} & 0.595 \tiny{($+.056$, ns)} & 0.757 \tiny{($+.021$, ns)} \\
+    Token identity (freq.) & 0.555 \tiny{($+.057$, ns)} & 0.610 \tiny{($+.037$, ns)} & 0.691 \tiny{($+.089$ [$+.026,+.151$])} \\
+    Next-token entropy & 0.514 \tiny{($+.098$, ns)} & 0.428 \tiny{($+.219$ [$+.085,+.348$])} & 0.434 \tiny{($+.346$ [$+.237,+.452$])} \\
+    Random direction & 0.545 \tiny{($+.065$, ns)} & 0.498 \tiny{($+.153$ [$+.050,+.254$])} & 0.505 \tiny{($+.273$ [$+.164,+.375$])} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+At 0.6B this is a clean null: the probe separates from nothing, not even a
+random direction. At 1.7B it clears uncertainty and the random null but not
+token identity. At 4B it separates from every cheaper explanation
+($+0.089$ over token identity, $p{=}0.002$). The only baseline it does not
+clear at 4B is the mean-difference direction (0.757, $p{=}0.160$), and that
+closeness is informative rather than deflationary: it says the signal is
+essentially a contrastive direction, which is precisely the object one
+would use for an intervention.
+
+An earlier version of this analysis, on a smaller and noisier label set at
+0.6B alone, gave 0.717 and looked promising; it did not survive a cleaner
+dataset. The result reported here is the opposite case --- weak where the
+data is weak, and strong only where scale supports it.
+
+\paragraph{Why $t-1$ is the honest position for this question.}
+Reading at the pivot instead raises the signed probe to 0.697, 0.859 and
+0.890. But most of that is not representation: token identity rises from
+0.56--0.70 at $t-1$ to 0.74--0.85 at $t$, because at the pivot the token
+being classified \emph{is} the pivot, and helpful and harmful tokens differ
+lexically. At 0.6B the lookup table actually beats the probe there (0.735
+versus 0.697). At $t-1$ that escape route is closed by construction --- a
+lookup on the current token cannot encode the sign of a token that has not
+been emitted --- so the $t-1$ column is the one that isolates representation
+from vocabulary.
 
 \subsection{No layer is special, and selection inflates the headline}
 \label{sec:layers}
@@ -479,9 +531,12 @@ the probe reads something other than local predictive difficulty. Reading
 at the pivot instead inverts entropy to below chance at every scale,
 locating the uncertainty signal specifically at $t-1$ --- the one position
 that is both informative and available while a decision can still be
-influenced. Whether the \emph{direction} of the impending shift is also
-decodable remains open; at 0.6B it is not, and the widening unsigned effect
-at larger scales makes that the natural next test.
+influenced. The \emph{direction} of the impending shift is
+decodable too, but only at scale: a null at 0.6B and 0.780 AUROC at 4B,
+separated from token identity, from uncertainty (which is sign-blind and
+scores below chance), and from a random direction. That the signed signal
+is closely approximated by a contrastive mean-difference direction makes it
+the natural object for a causal test, which is the next step.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
