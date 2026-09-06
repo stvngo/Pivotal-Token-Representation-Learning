@@ -292,6 +292,8 @@ def main() -> None:
         gate_mode=MODE_OBSERVE))
     base_mask = obs_arm.correct_mask
     results["base"] = obs_arm.as_dict()
+    results["base"]["correct_mask"] = [bool(x) for x in base_mask]
+    results["question_index"] = [int(i) for i in idx] if band_files else None
     p = obs["p_steer"]
 
     def dist(x):
@@ -355,6 +357,7 @@ def main() -> None:
 
     def record(nm, arm, st, primary=False):
         d = arm.as_dict()
+        d["correct_mask"] = [bool(x) for x in arm.correct_mask]
         d.update({k: v for k, v in st.items()
                   if k not in ("p_steer", "p_pivotal", "p_helpful",
                                "h_norm", "delta_norm")})

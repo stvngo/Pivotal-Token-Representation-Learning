@@ -1,0 +1,16 @@
+{
+  "tag": "qwen3-4b",
+  "acts": "data/acts_4b_at_t",
+  "layer": 21,
+  "C_unsigned": 0.001,
+  "C_signed": 0.001,
+  "inner_auroc_unsigned": NaN,
+  "inner_auroc_signed": NaN,
+  "n_train_unsigned": 1432,
+  "n_train_signed": 718,
+  "signed_positive_rate": 0.6740947075208914,
+  "cos_signed_probe_to_caa": 0.3776448667049408,
+  "cos_signed_to_unsigned_caa": 0.5819623470306396,
+  "act_norm_mean": 63.0511360168457,
+  "sweep": []
+}
