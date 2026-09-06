@@ -271,6 +271,20 @@ clean sessions reproduced a 237-question base rate *exactly*. Never mix
 a vLLM-modified session and a clean one across arms you intend to compare;
 within-run pairing is unaffected either way.
 
+**Size `max_model_len` for bisection, not for one rollout — a short window
+hangs the run.** Bisection conditions on ever-longer prefixes, so a deep
+node needs `prompt + 2 x max_new_tokens`. Set to one rollout's worth, vLLM
+raises `VLLMValidationError` on the over-long requests and the wave
+scheduler waits forever on results that never arrive: process alive, GPU
+at 0%, log frozen, `--status` still reporting ALIVE. On the 4B MATH run
+this appeared as two errors in 196k rollouts, which looked negligible, and
+then deadlocked the run four hours in. `pts_run` now computes the
+requirement and raises the window itself.
+
+Two diagnostics that distinguish a hung run from a slow one: `nvidia-smi`
+showing 0% utilisation with memory still held, and `stat -c %s job.log`
+twice twenty seconds apart. ALIVE only means the PID exists.
+
 **The Colab CLI reuses stale local session names.** After a prune and
 re-adopt, a session can come back under the name of an older, dead one:
 during the MATH runs the session holding the **32B** job was listed
