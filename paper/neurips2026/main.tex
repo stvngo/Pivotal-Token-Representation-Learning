@@ -607,6 +607,154 @@ decode positions. A separate identity check confirms that the hook at
 coefficient zero reproduces the baseline exactly, which separates the
 plumbing from the perturbation.
 
+\subsection{The detector at the steering layer}
+\label{sec:gatestrength}
+
+Because the steering layer is chosen by max-min rather than by either
+task's own optimum, the detector the intervention fires on is not the one
+Table~\ref{tab:main} reports. Table~\ref{tab:gate} gives what it actually
+achieves on held-out questions.
+
+\begin{table}[t]
+\centering
+\caption{Detectors at the steering layer, on test questions, with
+question-clustered 95\% intervals. \emph{Cascade} is the quantity the gate
+thresholds, $P(\text{pivotal}) \cdot (1 - P(\text{helpful}))$, scored
+against the event it is meant to detect: the next token is a pivot
+\emph{and} its shift is harmful.}
+\label{tab:gate}
+\begin{tabular}{lccccc}
+\toprule
+model & layer & gate & sign & cascade & harmful-pivot rate \\
+\midrule
+Qwen3-0.6B & 11 & 0.798 & 0.614 & 0.668 [0.555, 0.774] & 0.181 \\
+Qwen3-1.7B & 25 & 0.869 & 0.650 & 0.773 [0.702, 0.829] & 0.220 \\
+Qwen3-4B   & 21 & 0.922 & 0.780 & \textbf{0.836} [0.786, 0.881] & 0.207 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The cost of forcing both probes onto one layer falls almost entirely on
+the unsigned gate, and it is small: 0.798 / 0.869 / 0.922 here against
+0.807 / 0.863 / 0.897 at each task's own layer. At 4B the shared layer is
+in fact \emph{better}. We do not promote it. That layer was selected under
+a different objective, and moving the headline to it after seeing the test
+score would be selection on test --- the precise error
+Section~\ref{sec:layers} exists to document.
+
+What matters for the rest of this section is that the cascade is a real
+detector, not a weak one. At 4B it separates harmful pivots from
+everything else at 0.836 against a base rate of 0.207.
+
+\subsection{The intervention does not change accuracy, at any scale}
+\label{sec:causalresult}
+
+\begin{table}[t]
+\centering
+\caption{Pooled Qwen3-4B, 336 in-band questions, greedy decoding. Only the
+pre-registered primary arm carries an inference; the rest are controls,
+shown with net flips so size and direction are visible. Duty is the
+fraction of decode positions perturbed, holds included.}
+\label{tab:causal4b}
+\begin{tabular}{lrrrrr}
+\toprule
+arm & acc & $\Delta$ & duty & net & $p$ \\
+\midrule
+unsteered & 0.580 & --- & --- & --- & --- \\
+reactive, signed direction (primary) & 0.565 & $-0.015$ & 0.051 & $-5$ & 0.551 \\
+always-on, matched energy & 0.583 & $+0.003$ & 1.000 & $+1$ & --- \\
+random placement, matched duty & 0.568 & $-0.012$ & 0.053 & $-4$ & --- \\
+coefficient negated & 0.589 & $+0.009$ & 0.050 & $+3$ & --- \\
+unsigned direction & 0.580 & $+0.000$ & 0.049 & $0$ & --- \\
+gate on $P(\text{pivotal})$ only & 0.568 & $-0.012$ & 0.050 & $-4$ & --- \\
+random direction & 0.580 & $+0.000$ & 0.050 & $0$ & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Every arm sits within $\pm 0.015$ of the unsteered baseline
+(Table~\ref{tab:causal4b}), and the same holds at the two smaller scales:
+
+\begin{center}
+\begin{tabular}{lrrrrr}
+\toprule
+model & questions & cascade AUROC & base acc & reactive $\Delta$ (net, $p$) & negated $\Delta$ \\
+\midrule
+Qwen3-0.6B & 275 & 0.668 & 0.545 & $+0.007$ ($+2$, 0.73) & $+0.018$ \\
+Qwen3-1.7B & 149 & 0.773 & 0.570 & $-0.013$ ($-2$, 0.73) & $-0.013$ \\
+Qwen3-4B   & 336 & 0.836 & 0.580 & $-0.015$ ($-5$, 0.55) & $+0.009$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Detection improves monotonically with scale; the intervention does
+nothing at any of them.} This is the cleanest form the negative result
+could take. The failure is not that the probe cannot find the moment ---
+at 4B it finds it at 0.836 --- but that adding
+$\mu_{\text{helpful}} - \mu_{\text{harmful}}$ to the residual stream at
+that moment does not change what the model then does.
+
+\subsection{Why we read this as a null rather than a small effect}
+\label{sec:nullreading}
+
+Three pieces of evidence, none of which depends on a $p$-value.
+
+\paragraph{Negating the coefficient never hurts.} At all three scales the
+sign-flipped arm matches or beats the primary: $+0.018$ against $+0.007$,
+$-0.013$ against $-0.013$, $+0.009$ against $-0.015$. A direction with
+causal polarity cannot behave this way. The earlier round of this project
+saw the same signature --- coefficients $+0.96$ and $-1.04$ with identical
+$\|\delta\|$, both above baseline --- and read it as a dose-response.
+
+\paragraph{Disjoint halves of the same population disagree in sign.} GSM8K
+train and test index different questions, so the 4B band was evaluated as
+two runs. They point opposite ways on every arm:
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+arm & test half ($n{=}99$) & train half ($n{=}237$) \\
+\midrule
+reactive (primary) & $+0.030$ & $-0.034$ \\
+always-on, matched energy & $+0.071$ & $-0.025$ \\
+coefficient negated & $+0.040$ & $-0.004$ \\
+random placement & $+0.000$ & $-0.017$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Same model, same probe, same layer, same coefficient, two disjoint samples
+from one uncertainty band. Reported alone, the test half is a rising
+dose-response with a $+0.071$ always-on arm; the train half is a monotone
+degradation. Both are noise, and only running both makes that visible.
+This was not a designed replication --- it fell out of train and test
+indexing differently --- but it is the most useful thing in the section,
+because it measures the noise floor on the same axis as the effect.
+
+\paragraph{The dose-response is not monotone where it matters.} At 4B,
+$\alpha \in \{0.02, 0.05, 0.10, 0.20\}$ gives
+$\{-0.015, -0.015, +0.009, -0.009\}$: no ordering. At 1.7B it \emph{is}
+ordered, $\{+0.000, -0.013, -0.040, -0.054\}$, and monotonically
+\emph{downward}, as is the fire-rate sweep
+$\{+0.027, -0.013, -0.047\}$. Where a dose-response exists at all it
+describes damage accumulating with perturbation size, independent of
+direction --- consistent with the destructive regime reported for
+always-on additive steering, on a gentler slope because the gate fires on
+5\% of positions.
+
+\paragraph{What this does and does not establish.} It does not show that
+pivotality is causally inert. It shows that this intervention --- a
+single-position additive nudge along a mean-difference direction, at
+$\|\delta\| \le 0.2\|h\|$, gated at 2--10\% duty --- does not move GSM8K
+accuracy, on 336 questions, with a resolution of roughly $\pm 0.02$. A
+real effect smaller than that would be invisible here. Three obvious
+directions remain untested: perturbing a span rather than a position (our
+hysteresis arm reached only 16\% duty), acting on attention or MLP
+outputs rather than the residual stream, and steering toward a
+\emph{target} representation rather than along a difference of means. We
+report the null because the experiment was pre-registered and the
+controls are unambiguous, not because we think the question is settled.
+
 \section{Limitations}
 \label{sec:limitations}
 
@@ -622,6 +770,17 @@ which the model hallucinated multiple-choice options, and at least one
 event whose extreme $\pdelta$ traces to the answer-extraction cascade
 matching such a hallucination rather than to a genuine shift. Linear
 probes test linear decodability only.
+
+The causal experiment carries its own limits, stated in
+Section~\ref{sec:nullreading}: 336 questions at 4B give a resolution of
+roughly $\pm 0.02$ accuracy, so a genuine effect below that would not be
+detectable, and we tested one intervention family rather than the space of
+them. The probes are also applied off their fitting distribution --- they
+are fit on raw-conditioned PTS rollouts and run during chat-templated
+generation. That shift did not degrade the gate ($P(\text{pivotal})$ has
+mean 0.30 and standard deviation 0.19 over 121{,}016 decode positions at
+4B, not a degenerate distribution), but it is a gap between where the
+probe is measured and where it is used.
 
 At the smallest scale the margins over uncertainty are $+0.10$ to $+0.11$
 with lower bounds within 0.01 of zero, on 91 questions. They are
@@ -645,7 +804,21 @@ decodable too, but only at scale: a null at 0.6B and 0.780 AUROC at 4B,
 separated from token identity, from uncertainty (which is sign-blind and
 scores below chance), and from a random direction. That the signed signal
 is closely approximated by a contrastive mean-difference direction makes it
-the natural object for a causal test, which is the next step.
+the natural object for a causal test.
+
+That test is negative. Gating an additive intervention along
+$\mu_{\text{helpful}} - \mu_{\text{harmful}}$ on the probe changes GSM8K
+accuracy by $-0.015$ at 4B on 336 questions in the uncertainty band, with
+every control indistinguishable from it, and the same null at both smaller
+scales. The detector is not what fails: at the layer the intervention acts
+on, the cascade identifies harmful pivots at 0.836 AUROC. Reading and
+acting on a representation are different things, and this work establishes
+the first without the second. The negative result is sharper than a
+missing experiment would be, because it isolates where the gap lies, and
+because the controls --- a sign-flipped arm that never underperforms the
+primary, and two disjoint halves of one population that disagree in sign
+on every arm --- make the size of the noise floor explicit rather than
+leaving it to be inferred.
 
 \bibliographystyle{plainnat}
 \bibliography{references}

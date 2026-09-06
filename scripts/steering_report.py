@@ -110,6 +110,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="+")
     ap.add_argument("--out", default=None, help="write the LaTeX table here")
+    ap.add_argument("--out-json", default=None,
+                    help="write the pooled run as its own artifact, so the "
+                         "paper's numbers trace to a file rather than to a "
+                         "console session")
     ap.add_argument("--pool", action="store_true",
                     help="combine runs of the same model over disjoint question "
                          "sets. GSM8K train and test index different questions, "
@@ -120,7 +124,11 @@ def main() -> None:
 
     runs = [load(Path(f)) for f in a.files]
     if a.pool and len(runs) > 1:
-        runs = [pool(runs)] + runs
+        pooled = pool(runs)
+        if a.out_json:
+            Path(a.out_json).write_text(json.dumps(pooled, indent=2, default=float))
+            print(f"wrote {a.out_json}")
+        runs = [pooled] + runs
 
     for d in runs:
         m = d.get("_meta", {})
