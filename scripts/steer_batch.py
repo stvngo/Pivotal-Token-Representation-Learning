@@ -22,7 +22,20 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+def _find_steer_eval() -> Path:
+    """Locate steer_eval.py from wherever this script was dropped.
+
+    colab_job uploads the batch script to the repo root while the repo's own
+    copy of steer_eval.py sits in scripts/, so resolving next to __file__
+    alone finds nothing and python exits 2 before printing anything useful.
+    """
+    here = Path(__file__).resolve().parent
+    for cand in (here / "steer_eval.py", here / "scripts" / "steer_eval.py",
+                 here.parent / "scripts" / "steer_eval.py"):
+        if cand.exists():
+            return cand
+    raise SystemExit(f"steer_eval.py not found near {here}")
+
 
 
 def main() -> None:
@@ -34,7 +47,7 @@ def main() -> None:
     print(f"[batch] {len(runs)} runs queued", flush=True)
     results = []
     for i, cfg in enumerate(runs, 1):
-        argv = [sys.executable, str(ROOT / "steer_eval.py")]
+        argv = [sys.executable, str(_find_steer_eval())]
         for k, v in cfg.items():
             argv.append(k)
             if v is not None:
