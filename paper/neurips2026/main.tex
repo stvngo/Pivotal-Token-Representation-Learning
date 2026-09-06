@@ -15,9 +15,10 @@
 % carried in.
 
 \documentclass{article}
-\usepackage[preprint]{neurips_2026}
-% \usepackage[dblblindworkshop]{neurips_2026}
-% \workshoptitle{TODO: Workshop Name}
+% \usepackage[preprint]{neurips_2026}
+% \usepackage[final]{neurips_2026}
+\usepackage[dblblindworkshop]{neurips_2026}
+\workshoptitle{The 6th Workshop on Mathematical Reasoning and AI, NeurIPS 2026}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -246,7 +247,7 @@ raw conditioning, none of these models is close to saturating GSM8K.
   candidate questions whose baseline success probability fell inside the
   searchable band.}
   \label{tab:data}
-  \small
+  \normalsize
   \setlength{\tabcolsep}{4pt}
   \begin{tabular}{lccccc}
     \toprule
@@ -309,23 +310,26 @@ questions. The probe separates from every baseline at every scale.
 \subsection{The advantage over uncertainty grows with scale}
 \label{sec:scaling}
 
-The single most informative pattern in Table~\ref{tab:main} is not any one
-number but a trend. Probe AUROC rises monotonically with model size,
+From Table~\ref{tab:main}, the probe AUROC rises monotonically with model size,
 $0.807 \to 0.863 \to 0.897$, while next-token entropy stays essentially
 flat, $0.693 \to 0.721 \to 0.694$. The gap therefore widens from $+0.112$
 ($p{=}0.013$) at 0.6B to $+0.204$ ($p{<}0.001$) at 4B.
 
-This rules out the most deflationary reading of a single-scale result. If
-larger models were simply ``easier to probe'' in some generic way, the
-cheap detectors would improve alongside the probe; they do not. What
-improves is specifically the linear availability of pivotality in the
-residual stream, and what it is pulling away from is specifically
-predictive uncertainty.
+This weighs against the most deflationary reading of a single-scale
+result. If larger models were simply ``easier to probe'' in some generic
+way, the cheap detectors would improve alongside the probe. The
+uncertainty statistics do not: entropy holds at
+$0.693 \to 0.721 \to 0.694$, and the top-1 and top-2 statistics are as
+flat.
 
-The margin over \emph{token identity} does not show the same trend
-($+0.110 \to +0.149 \to +0.107$): token identity itself gets stronger with
-scale (0.696 $\to$ 0.715 $\to$ 0.791), so probe and lookup table improve
-together. The widening is uncertainty-specific.
+\emph{Token identity is the exception}, and it qualifies the claim rather
+than supporting it. Taking the stronger of its two forms, it rises
+$0.716 \to 0.715 \to 0.791$, so the probe's margin over it does not widen
+($+0.091 \to +0.148 \to +0.106$) --- between 1.7B and 4B the probe and the
+lookup table improve together. Part of what scale buys is therefore
+available to a purely lexical account, and we do not claim otherwise. What
+widens with scale is specifically the separation from predictive
+uncertainty.
 
 \subsection{The sign of the impending shift is decodable, at scale}
 \label{sec:signed}
@@ -379,12 +383,13 @@ An earlier version of this analysis, on a smaller and noisier label set at
 dataset. The result reported here is the opposite case --- weak where the
 data is weak, and strong only where scale supports it.
 
-\paragraph{Why $t-1$ is the honest position for this question.}
-Reading at the pivot instead raises the signed probe to 0.697, 0.859 and
-0.890. But most of that is not representation: token identity rises from
-0.56--0.70 at $t-1$ to 0.74--0.85 at $t$, because at the pivot the token
-being classified \emph{is} the pivot, and helpful and harmful tokens differ
-lexically. At 0.6B the lookup table actually beats the probe there (0.735
+\paragraph{Why $t-1$ over $t$?}
+Probing the pivotal token instead raises the signed probe to 0.697, 0.859 and
+0.890. Though, most of the improvement could be attributed to token identity, 
+which rises from 0.56--0.70 at $t-1$ to 0.74--0.85 at $t$, 
+because at the pivotal token, the token being classified \emph{is} the pivot, 
+and helpful and harmful tokens could differ lexically. 
+At 0.6B the lookup table actually beats the probe there (0.735
 versus 0.697). At $t-1$ that escape route is closed by construction --- a
 lookup on the current token cannot encode the sign of a token that has not
 been emitted --- so the $t-1$ column is the one that isolates representation
@@ -850,11 +855,11 @@ from. Published PTS datasets avoid the problem incidentally, because the
 sequence they store stops at the deepest pivot; it appears as soon as one
 keeps the full rollout, which is otherwise the more useful artifact.
 
-\section{Reading at the pivot instead of before it}
+\section{Probing at the pivot instead of before it}
 \label{sec:at-t}
 
-Moving the label from $t-1$ to the pivot itself gives a post-hoc
-classifier: informative, but unable to gate anything.
+Probing the pivotal token instead of $t-1$ gives a post-hoc classifier. While the probe 
+captures informatation about the success probability, it is unable to steer anything.
 
 \begin{table}[t]
   \centering
