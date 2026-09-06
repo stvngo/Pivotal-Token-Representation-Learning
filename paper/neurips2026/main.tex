@@ -315,21 +315,20 @@ $0.807 \to 0.863 \to 0.897$, while next-token entropy stays essentially
 flat, $0.693 \to 0.721 \to 0.694$. The gap therefore widens from $+0.112$
 ($p{=}0.013$) at 0.6B to $+0.204$ ($p{<}0.001$) at 4B.
 
-This weighs against the most deflationary reading of a single-scale
-result. If larger models were simply ``easier to probe'' in some generic
-way, the cheap detectors would improve alongside the probe. The
-uncertainty statistics do not: entropy holds at
-$0.693 \to 0.721 \to 0.694$, and the top-1 and top-2 statistics are as
-flat.
+A result at a single scale invites the objection that larger models are
+simply easier to probe. Were that the explanation, the cheaper detectors
+should improve alongside the probe. The uncertainty statistics do not:
+next-token entropy measures $0.693$, $0.721$ and $0.694$ across the three
+scales, and the top-1 and top-2 statistics are similarly flat.
 
-\emph{Token identity is the exception}, and it qualifies the claim rather
-than supporting it. Taking the stronger of its two forms, it rises
-$0.716 \to 0.715 \to 0.791$, so the probe's margin over it does not widen
-($+0.091 \to +0.148 \to +0.106$) --- between 1.7B and 4B the probe and the
-lookup table improve together. Part of what scale buys is therefore
-available to a purely lexical account, and we do not claim otherwise. What
-widens with scale is specifically the separation from predictive
-uncertainty.
+Token identity behaves differently, and this bounds the conclusion. In its
+one-hot logistic form it measures $0.716$, $0.715$ and $0.791$, so the
+probe's margin over it does not increase ($+0.091$, $+0.148$, $+0.106$).
+Between 1.7B and 4B the probe and a purely lexical baseline improve in
+step, and some portion of what scale contributes is therefore accessible
+without appeal to a computed representation. The trend we report is a
+specific one: what widens with scale is the separation from predictive
+uncertainty, not from token identity.
 
 \subsection{The sign of the impending shift is decodable, at scale}
 \label{sec:signed}
