@@ -98,7 +98,7 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
     # per-batch state, and generate() is called once per batch inside
     # generate_batched. Rather than reach inside, run batch by batch here.
     resp, nnew, stats = [], [], []
-    p_all, piv_all, help_all = [], [], []
+    p_all, piv_all, help_all, norm_all = [], [], [], []
     for i in range(0, len(prompts), batch_size):
         chunk = list(prompts[i:i + batch_size])
         hook = CascadeSteeringHook(model, **hook_kwargs)
@@ -113,7 +113,7 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
         if hook.stats.p_steer:
             keep = None
             for key, sink in (("p_steer", p_all), ("p_pivotal", piv_all),
-                              ("p_helpful", help_all)):
+                              ("p_helpful", help_all), ("h_norm", norm_all)):
                 seq = getattr(hook.stats, key)
                 if not seq:
                     continue
@@ -138,7 +138,7 @@ def run_arm(model, tok, prompts, golds, *, name, hook_kwargs, max_new_tokens,
         s["duty_cycle_trimmed"] * s["n_positions_trimmed"] for s in stats
     ) / max(1, agg["n_positions_trimmed"])
     for key, sink in (("p_steer", p_all), ("p_pivotal", piv_all),
-                      ("p_helpful", help_all)):
+                      ("p_helpful", help_all), ("h_norm", norm_all)):
         agg[key] = np.concatenate(sink) if sink else np.zeros(0)
     return score(resp, golds, nnew, name=name, max_new_tokens=max_new_tokens), agg
 
@@ -232,8 +232,15 @@ def main() -> None:
             print(f"    {k:<10} mean {d['mean']:.4f} sd {d['sd']:.4f} "
                   f"p50 {d['p50']:.4f} p95 {d['p95']:.4f} max {d['max']:.4f}", flush=True)
 
-    def thresh(rate: float) -> float:
-        return float(np.quantile(p, 1.0 - rate))
+    def thresh(rate: float, scores: np.ndarray | None = None) -> float:
+        """Threshold achieving ``rate`` on the gate's *own* score distribution.
+
+        Each gate variant needs its own calibration: P(pivotal) alone is much
+        larger than the cascade P(pivotal)*(1-P(helpful)), so reusing the
+        cascade's quantile made the unsigned-gate control fire on 53% of
+        positions where it was meant to fire on 5%.
+        """
+        return float(np.quantile(p if scores is None else scores, 1.0 - rate))
 
     # -- identity: the hook plumbing itself must be a no-op ----------------
     small = prompts[: min(32, len(prompts))]
@@ -252,7 +259,7 @@ def main() -> None:
     def record(nm, arm, st, primary=False):
         d = arm.as_dict()
         d.update({k: v for k, v in st.items()
-                  if k not in ("p_steer", "p_pivotal", "p_helpful")})
+                  if k not in ("p_steer", "p_pivotal", "p_helpful", "h_norm")})
         d["vs_base"] = mcnemar(base_mask, arm.correct_mask)
         d["delta_acc"] = arm.accuracy - obs_arm.accuracy
         d["primary"] = primary
@@ -272,8 +279,16 @@ def main() -> None:
 
     # -- matched controls --------------------------------------------------
     print("[4] matched controls", flush=True)
+    # Match injected energy, not duty cycle: sum_{would fire} ||h|| over
+    # sum_{all} ||h||, measured in the observe pass. The gate concentrates on
+    # high-norm positions, so duty-matching alone left always-on ~20% short.
+    hn, fired_mask = obs["h_norm"], p > thresh(a.rate)
+    energy_frac = float(hn[fired_mask].sum() / max(hn.sum(), 1e-9))
+    results["energy_match"] = {"duty_estimate": float(fired_mask.mean()),
+                               "energy_fraction": energy_frac}
     arm, st = run(name="always_on", hook_kwargs=dict(
-        base_kw, vector=v_signed, coef=a.alpha * duty, gate_mode=MODE_ALWAYS_ON))
+        base_kw, vector=v_signed, coef=a.alpha * energy_frac,
+        gate_mode=MODE_ALWAYS_ON))
     record("always_on_matched_energy", arm, st)
 
     arm, st = run(name="random_placement", hook_kwargs=dict(
@@ -307,8 +322,8 @@ def main() -> None:
     ung = dict(base_kw)
     ung["sign_w"] = None
     arm, st = run(name="unsigned_gate", hook_kwargs=dict(
-        ung, vector=v_signed, coef=a.alpha,
-        gate_mode=MODE_REACTIVE, threshold=thresh(a.rate)))
+        ung, vector=v_signed, coef=a.alpha, gate_mode=MODE_REACTIVE,
+        threshold=thresh(a.rate, obs["p_pivotal"])))
     record("unsigned_gate", arm, st)
 
     # -- dose response -----------------------------------------------------

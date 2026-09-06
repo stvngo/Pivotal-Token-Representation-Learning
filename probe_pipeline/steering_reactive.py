@@ -82,6 +82,11 @@ class SteeringStats:
     # visible rather than hidden inside their product.
     p_pivotal: list[np.ndarray] = field(default_factory=list)
     p_helpful: list[np.ndarray] = field(default_factory=list)
+    # Residual norm at each gated position. additive_normalized scales the
+    # perturbation by ||h||, and the gate does not fire uniformly over
+    # positions, so matching an always-on arm on duty cycle alone mismatches
+    # the injected energy. With ||h|| recorded the match is exact.
+    h_norm: list[np.ndarray] = field(default_factory=list)
 
     @property
     def duty_cycle(self) -> float:
@@ -263,6 +268,7 @@ class CascadeSteeringHook:
 
         h = hidden[:, -1, :]
         perturb, p = self._decide(h)
+        self.stats.h_norm.append(h.detach().float().norm(dim=-1).cpu().numpy())
         self.stats.n_positions += int(h.shape[0])
         self.stats.p_steer.append(p.detach().float().cpu().numpy())
         self.stats.perturbed.append(perturb.detach().cpu().numpy())
