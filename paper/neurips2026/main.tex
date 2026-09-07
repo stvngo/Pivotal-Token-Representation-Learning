@@ -1046,53 +1046,56 @@ Figure~\ref{fig:example} has to be drawn as points because bisection only
 evaluates a handful of prefixes, which leaves the obvious question open:
 between those points, does the probability move in ways the search never
 sees? For a single branch this is answerable. We re-estimated
-$P(\text{success})$ at \emph{every} prefix of two branches --- 320 and 327
-positions, 40 fresh rollouts each, four and two minutes on one GPU --- and
+$P(\text{success})$ at \emph{every} one of the 320 prefixes of a Qwen3-4B
+GSM8K rollout, 40 fresh rollouts each --- four minutes on one GPU --- and
 overlaid the result on what the search recorded.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.95\textwidth]{figures/dense_vs_bisection.pdf}
-\caption{Every prefix re-estimated (line) against the estimates bisection
-actually made (circles) and the events it accepted (arrows). Top: the
-Qwen3-4B GSM8K branch. Bottom: the Qwen3-1.7B MATH branch of
-Section~\ref{app:example}. The high-frequency movement is sampling noise
-rather than structure --- at $S{=}40$ and $p \approx 0.5$ the standard
-error is $0.079$, against mean absolute steps of $0.034$ and $0.050$. The
-dotted arrow is an accepted event that does not survive re-measurement.}
+\caption{Every prefix of one Qwen3-4B GSM8K branch re-estimated (line),
+against the estimates bisection actually made (circles) and the five
+events it accepted (arrows). The high-frequency movement is sampling noise
+rather than structure: at $S{=}40$ and $p \approx 0.5$ the standard error
+is $0.079$, against a mean absolute step of $0.034$ between adjacent
+positions.}
 \label{fig:dense}
 \end{figure}
 
-\paragraph{The large moves are found, and they replicate.} On the GSM8K
-branch, agreement is exact: all five accepted events reappear in the dense
-curve, and no step of $0.2$ or more anywhere in the sequence was missed.
-On the MATH branch, four of five reappear and the four agree to within
-$0.02$ --- $+0.32$ against $+0.30$, $-0.55$ against $-0.53$, $+0.70$
-against $+0.68$, $-1.00$ against $-1.00$. Across both branches, every
-single-token step of $0.25$ or more is an event the search accepted.
-Bisection is not stepping over structure it never sees; where the
-probability genuinely moves, it finds it.
+\paragraph{The search misses nothing here.} All five accepted events
+reappear in the dense curve, and no single-token step of $0.2$ or more
+anywhere in the sequence went untested. Bisection is not stepping over
+structure it never sees: on this branch, the set of large moves and the
+set of accepted events are the same set. That is the property the sparse
+figure cannot demonstrate and this one can.
 
-\paragraph{At the threshold itself, both measurements are noise-limited.}
-The exceptions are all at $\tau$. On the MATH branch the search accepted
-position 290 at $\pdelta = +0.20$, and re-measured that transition is
-$+0.03$; the dense curve also shows a $-0.20$ step at position 80 that the
-search never tested. Neither is a defect of bisection, and both sit
-exactly where Section~\ref{sec:labelnoise} says disagreement should live:
-a difference of two binomials at $S{=}40$ has standard error near $0.08$,
-so a threshold at $0.2$ is about $2.5\sigma$ and boundary events are the
-ones that will not replicate. One of ten accepted events across the two
-branches fails an independent re-measurement, and it is the one accepted
-at exactly $\tau$.
+This is one branch, so it bounds nothing in general --- and
+Section~\ref{sec:labelnoise} gives the reason to expect exceptions where
+they will occur, which is at the acceptance threshold rather than in the
+interior. A difference of two binomials at $S{=}40$ has standard error
+near $0.08$, so $\tau = 0.2$ sits about $2.5\sigma$ out, and an event
+accepted at exactly $\tau$ is the kind that will not survive
+re-measurement. Nothing on this branch was accepted that close to the
+line.
 
-\paragraph{What the trajectories look like.} Worth noting for its own
-sake: neither curve resembles a smooth descent into an answer. The GSM8K
-branch sits at zero for seventy tokens, jumps to near-certainty at the
-first correct equation, collapses at the second, and oscillates in the
-band for the rest of the rollout. Success probability under this model is
-better described as a sequence of commitments than as an accumulation of
-evidence, which is the property that makes a token-level notion of
-pivotality meaningful in the first place.
+\paragraph{Success probability moves in commitments, not accumulation.}
+The shape of the curve is worth its own remark, because it is not the
+shape one would assume. The trajectory does not descend gradually toward
+an answer as evidence accrues. It sits near zero for seventy tokens while
+the model restates the problem, jumps to near-certainty the moment it
+writes the first correct equation, collapses when it commits to the second
+and then mishandles the phrasing that follows, and oscillates inside the
+band for the remainder. Between those transitions it is close to flat.
+
+That structure is what makes a \emph{token-level} notion of pivotality
+coherent at all. If success probability drifted smoothly, no single
+position would carry a $|\pdelta| > \tau$ shift and PTS would find
+nothing; the reason it finds anything is that reasoning traces contain a
+small number of positions where the model commits, and the rest of the
+sequence largely elaborates a commitment already made. It is also why the
+probe has something to read at $t-1$: a commitment is a decision the
+model can be in the middle of making, and a representation of being about
+to make one is exactly what the $t-1$ position would have to contain.
 
 \section{Which tokens are pivotal}
 \label{app:tokens}

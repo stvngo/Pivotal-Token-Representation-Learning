@@ -25,9 +25,9 @@ MUTED_TXT = "#6b6b6b"
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sweeps",
-                    default="artifacts/dense_sweep_q1223.json,artifacts/dense_sweep_q355.json",
+                    default="artifacts/dense_sweep_q1223.json",
                     help="one panel per sweep, stacked")
-    ap.add_argument("--labels", default="Qwen3-4B, GSM8K;Qwen3-1.7B, MATH")
+    ap.add_argument("--labels", default="Qwen3-4B, GSM8K")
     ap.add_argument("--tau", type=float, default=0.2)
     ap.add_argument("--out", default="paper/neurips2026/figures/dense_vs_bisection.pdf")
     ap.add_argument("--png", default=None)
@@ -40,7 +40,7 @@ def main() -> None:
     import numpy as np
     paths = [x for x in a.sweeps.split(",") if x]
     labels = a.labels.split(";")
-    fig, axes = plt.subplots(len(paths), 1, figsize=(6.6, 2.7 * len(paths)))
+    fig, axes = plt.subplots(len(paths), 1, figsize=(6.6, 3.0 * len(paths)))
     axes = np.atleast_1d(axes)
     summary = []
 
@@ -88,21 +88,27 @@ def main() -> None:
         ax.tick_params(labelsize=8)
         # Upper left: both curves run low-to-mid there, and the bottom
         # right of each panel carries the final collapse.
-        ax.text(0.008, 0.94, lab, transform=ax.transAxes, fontsize=7.5,
-                color=MUTED_TXT, ha="left", va="top")
+        if len(paths) > 1:
+            ax.text(0.008, 0.94, lab, transform=ax.transAxes, fontsize=7.5,
+                    color=MUTED_TXT, ha="left", va="top")
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
     axes[-1].set_xlabel("token position in the sequence", fontsize=9)
 
     from matplotlib.lines import Line2D
-    fig.legend(handles=[
+    handles = [
         Line2D([], [], color=C_DENSE, lw=1.0, label="every prefix re-estimated"),
         Line2D([], [], marker="o", ls="none", mfc="white", mec=C_DENSE, ms=5,
                label="estimates the search made"),
         Line2D([], [], color=C_HELP, lw=1.9, label="accepted pivot, replicated"),
-        Line2D([], [], color=C_MISS, lw=1.9, ls=":", label="accepted, not replicated"),
-    ], fontsize=7, frameon=False, loc="lower center", ncol=2,
-       bbox_to_anchor=(0.55, -0.055))
+    ]
+    # Only name the failure case if the figure actually contains one; a
+    # legend entry with no instances invites a hunt for something absent.
+    if any(n_rep < n_ev for _, n_ev, n_rep, _, _ in summary):
+        handles.append(Line2D([], [], color=C_MISS, lw=1.9, ls=":",
+                              label="accepted, not replicated"))
+    fig.legend(handles=handles, fontsize=7, frameon=False, loc="lower center",
+               ncol=len(handles), bbox_to_anchor=(0.55, -0.055))
     fig.tight_layout(rect=(0, 0.06, 1, 1))
 
     out = ROOT / a.out
