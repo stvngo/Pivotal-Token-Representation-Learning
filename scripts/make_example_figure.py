@@ -34,7 +34,8 @@ def main() -> None:
     ap.add_argument("--generation", type=int, default=0)
     ap.add_argument("--tokenizer", default="Qwen/Qwen3-0.6B")
     ap.add_argument("--outdir", default="paper/neurips2026/figures")
-    ap.add_argument("--tex", default="paper/neurips2026/example_rollout.tex")
+    ap.add_argument("--tex", default=None,
+                    help="default: paper/neurips2026/example_rollout_<query>.tex")
     ap.add_argument("--png", default=None)
     a = ap.parse_args()
 
@@ -98,11 +99,11 @@ def main() -> None:
 
     out = ROOT / a.outdir
     out.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out / "example_rollout_probability.pdf", bbox_inches="tight")
+    fig.savefig(out / f"example_rollout_q{a.query}.pdf", bbox_inches="tight")
     if a.png:
         fig.savefig(a.png, bbox_inches="tight", dpi=110)
     plt.close(fig)
-    print(f"wrote {out / 'example_rollout_probability.pdf'}")
+    print(f"wrote {out / f'example_rollout_q{a.query}.pdf'}")
 
     # LaTeX listing of the rollout with the pivots marked in place.
     piv = {e["position"]: e for e in es}
@@ -155,8 +156,9 @@ position & token & $p_{{\\text{{before}}}}$ & $p_{{\\text{{after}}}}$ & $\\pdelt
 \\end{{tabular}}
 \\end{{center}}
 """
-    (ROOT / a.tex).write_text(tex)
-    print(f"wrote {ROOT / a.tex}")
+    texpath = ROOT / (a.tex or f"paper/neurips2026/example_rollout_q{a.query}.tex")
+    texpath.write_text(tex)
+    print(f"wrote {texpath}")
     print(f"{len(es)} pivots, prompt {plen} tok, sequence {len(seq)} tok")
 
 
