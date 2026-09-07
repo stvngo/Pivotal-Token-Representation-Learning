@@ -947,98 +947,136 @@ for anyone intending to use the weights as an intervention direction rather
 than only as a classifier.
 
 
-% \section{What a searched rollout looks like}
-% \label{app:example}
-%
-% The definition in Eq.~\ref{eq:pts} and the AUROCs in
-% Section~\ref{sec:results} say what pivotality is and how well it decodes,
-% but not what one actually looks like. This is a single Qwen3-4B branch
-% from our GSM8K run, chosen for having several accepted pivots spread
-% through the rollout rather than clustered at its end.
-%
-% \begin{figure}[h]
-% \centering
-% \includegraphics[width=0.92\textwidth]{figures/example_rollout_probability.pdf}
-% \caption{Estimated success probability along one searched rollout. Grey
-% points are the estimates the search actually made; arrows are the accepted
-% pivots. Note that the points are sparse and unevenly spaced: PTS bisects
-% rather than sweeping, so it evaluates on the order of fourteen midpoints
-% per rollout, and the accepted events are the subset where the probability
-% moved by more than $\tau$. A smooth curve over every token would depict a
-% measurement that was never taken. The shaded region is the $[0.2, 0.8]$
-% band a query must start inside to be searched at all.}
-% \label{fig:example}
-% \end{figure}
-%
-% \input{example_rollout}
-%
-% Two things in this example are worth drawing out. The two largest
-% movements both land on \texttt{=}, the token at which the model commits to
-% a computed value --- $0.00 \to 0.85$ when it writes
-% \emph{Steven's falls = 3} correctly, and $1.00 \to 0.17$ when it commits
-% to \emph{Stephanie's falls = 16} and then, in the continuation, mishandles
-% ``2 times less than half''. Pivotality here is not a property of the token
-% string: the same token \texttt{=} is helpful at one position and harmful
-% at another, which is precisely why a lookup on token identity
-% (Table~\ref{tab:main}) can only go so far.
-%
-% Second, the probability is far from monotone. It recovers from $0.17$ to
-% $1.00$ between positions 203 and 202's successor without any accepted
-% event in between, because no tested midpoint in that interval exceeded
-% $\tau$. The search localises large moves; it does not track the
-% trajectory.
-
 \section{What a searched rollout looks like}
 \label{app:example}
 
-Eq.~\ref{eq:pts} says what pivotality is and Section~\ref{sec:results}
-says how well it decodes, but neither shows one. This is a single
-Qwen3-1.7B branch, taken from a search over MATH rather than GSM8K for a
-reason worth stating: the GSM8K runs condition on the bare question to
-match upstream, and an instruct model given a bare question imitates
-whatever page it thinks it is on. Across those runs, 38 of the 74 branches
-carrying four or more pivots contain hallucinated multiple-choice options,
-homework-site furniture, or a collapse into pleasantries --- the artifact
-Section~\ref{sec:limitations} records. The MATH search conditions through
-the chat template and produces ordinary worked solutions, so the example
-below illustrates the method rather than the conditioning.
+The definition in Eq.~\ref{eq:pts} and the AUROCs in
+Section~\ref{sec:results} say what pivotality is and how well it decodes,
+but not what one actually looks like. This is a single Qwen3-4B branch
+from our GSM8K run, chosen for having several accepted pivots spread
+through the rollout rather than clustered at its end.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.92\textwidth]{figures/example_rollout_q355.pdf}
+\includegraphics[width=0.92\textwidth]{figures/example_rollout_probability.pdf}
 \caption{Estimated success probability along one searched rollout. Grey
 points are the estimates the search actually made; arrows are the accepted
-pivots. The points are sparse and unevenly spaced because PTS bisects
-rather than sweeping: it evaluates on the order of fourteen midpoints per
-rollout and accepts the subset whose shift exceeds $\tau$. A smooth curve
-over every token would depict a measurement that was never taken. The
-shaded region is the $[0.2, 0.8]$ band a query must start inside to be
-searched at all.}
+pivots. Note that the points are sparse and unevenly spaced: PTS bisects
+rather than sweeping, so it evaluates on the order of fourteen midpoints
+per rollout, and the accepted events are the subset where the probability
+moved by more than $\tau$. A smooth curve over every token would depict a
+measurement that was never taken. The shaded region is the $[0.2, 0.8]$
+band a query must start inside to be searched at all.}
 \label{fig:example}
 \end{figure}
 
-\input{example_rollout_q355}
+\input{example_rollout}
 
-The solution is correct: 16 people, $\binom{16}{2} = 120$ possible
-handshakes, minus $4\binom{4}{2} = 24$ within-company pairs, giving 96.
-Two features of the trace are worth drawing out.
+Two things in this example are worth drawing out. The two largest
+movements both land on \texttt{=}, the token at which the model commits to
+a computed value --- $0.00 \to 0.85$ when it writes
+\emph{Steven's falls = 3} correctly, and $1.00 \to 0.17$ when it commits
+to \emph{Stephanie's falls = 16} and then, in the continuation, mishandles
+``2 times less than half''. Pivotality here is not a property of the token
+string: the same token \texttt{=} is helpful at one position and harmful
+at another, which is precisely why a lookup on token identity
+(Table~\ref{tab:main}) can only go so far.
 
-\paragraph{A pivot is a branch point, not an error.} The largest movement
-in the trace, $1.00 \to 0.00$, is at the backslash opening
-\texttt{\textbackslash boxed\{96\}} in the restated final answer --- a
-token in a correct solution to a correctly solved problem. What collapses
-is not the answer but the continuation: rollouts sampled from that prefix
-frequently carry on past the answer and emit something else the oracle
-then reads instead. Pivotality is a property of the distribution over
-continuations, not a judgement about the token, and this is the cleanest
-illustration of that distinction we have.
+Second, the probability is far from monotone. It recovers from $0.17$ to
+$1.00$ between positions 203 and 202's successor without any accepted
+event in between, because no tested midpoint in that interval exceeded
+$\tau$. The search localises large moves; it does not track the
+trajectory.
 
-\paragraph{The probability is not monotone, and the search does not track
-it.} Between positions 296 and 385 the estimate sits at 1.00 with no
-recorded event, because no tested midpoint in that interval moved by more
-than $\tau$. Bisection localises large moves; it does not follow the
-trajectory, and the figure is drawn as points rather than a line so as not
-to imply otherwise.
+% \section{What a searched rollout looks like}
+% \label{app:example}
+
+% Eq.~\ref{eq:pts} says what pivotality is and Section~\ref{sec:results}
+% says how well it decodes, but neither shows one. This is a single
+% Qwen3-1.7B branch, taken from a search over MATH rather than GSM8K for a
+% reason worth stating: the GSM8K runs condition on the bare question to
+% match upstream, and an instruct model given a bare question imitates
+% whatever page it thinks it is on. Across those runs, 38 of the 74 branches
+% carrying four or more pivots contain hallucinated multiple-choice options,
+% homework-site furniture, or a collapse into pleasantries --- the artifact
+% Section~\ref{sec:limitations} records. The MATH search conditions through
+% the chat template and produces ordinary worked solutions, so the example
+% below illustrates the method rather than the conditioning.
+
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=0.92\textwidth]{figures/example_rollout_q355.pdf}
+% \caption{Estimated success probability along one searched rollout. Grey
+% points are the estimates the search actually made; arrows are the accepted
+% pivots. The points are sparse and unevenly spaced because PTS bisects
+% rather than sweeping: it evaluates on the order of fourteen midpoints per
+% rollout and accepts the subset whose shift exceeds $\tau$. A smooth curve
+% over every token would depict a measurement that was never taken. The
+% shaded region is the $[0.2, 0.8]$ band a query must start inside to be
+% searched at all.}
+% \label{fig:example}
+% \end{figure}
+
+% \input{example_rollout_q355}
+
+% The solution is correct: 16 people, $\binom{16}{2} = 120$ possible
+% handshakes, minus $4\binom{4}{2} = 24$ within-company pairs, giving 96.
+% Two features of the trace are worth drawing out.
+
+% \paragraph{A pivot is a branch point, not an error.} The largest movement
+% in the trace, $1.00 \to 0.00$, is at the backslash opening
+% \texttt{\textbackslash boxed\{96\}} in the restated final answer --- a
+% token in a correct solution to a correctly solved problem. What collapses
+% is not the answer but the continuation: rollouts sampled from that prefix
+% frequently carry on past the answer and emit something else the oracle
+% then reads instead. Pivotality is a property of the distribution over
+% continuations, not a judgement about the token, and this is the cleanest
+% illustration of that distinction we have.
+
+% \paragraph{The probability is not monotone, and the search does not track
+% it.} Between positions 296 and 385 the estimate sits at 1.00 with no
+% recorded event, because no tested midpoint in that interval moved by more
+% than $\tau$. Bisection localises large moves; it does not follow the
+% trajectory, and the figure is drawn as points rather than a line so as not
+% to imply otherwise.
+
+\section{Which tokens are pivotal}
+\label{app:tokens}
+
+Two results in the main text rest on facts about this distribution, and
+neither shows it.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.62\textwidth]{figures/pivotal_token_distribution.pdf}
+\caption{The thirty most frequent pivotal tokens, pooled over all three
+GSM8K searches (2{,}459 events, 359 distinct tokens), split by the sign of
+$\pdelta$. \texttt{\textvisiblespace} marks a leading space. Bar length is
+frequency and is severely skewed, so the sign split is also given as a
+percentage, which stays legible where the bars do not.}
+\label{fig:tokens}
+\end{figure}
+
+\paragraph{Pivots concentrate, which is why token identity is a real
+baseline.} The thirty tokens shown account for 69.6\% of all pivotal
+events, and a single token --- \texttt{\textvisiblespace=} --- accounts for
+\textbf{28.0\%}. A detector that only knows the current token's identity
+is therefore not a straw man: it can capture a large share of the positive
+class from a handful of entries, which is what it scores 0.69--0.79 doing
+(Table~\ref{tab:main}). It also explains why that baseline strengthens at
+4B, where the model's arithmetic becomes more stereotyped.
+
+\paragraph{But identity does not determine sign, which is why the signed
+task is not trivial.} If pivotal tokens were reliably helpful or reliably
+harmful, the signed probe would have nothing to do that a lookup table
+could not. Some tokens are close to determined --- \texttt{\textvisiblespace To}
+is 98\% helpful, opening a fresh solution attempt, and \texttt{\textvisiblespace-}
+is 4\%, opening a list the model then loses track of. The most common
+token is not: \texttt{\textvisiblespace=} is 75\% helpful and 25\% harmful, so
+for the token carrying more than a quarter of the positive class, identity
+leaves the sign genuinely open. That gap is what a signed probe at $t-1$
+has to fill, and Table~\ref{tab:signed} reports how much of it gets
+filled.
 
 \section{Reproduction}
 
