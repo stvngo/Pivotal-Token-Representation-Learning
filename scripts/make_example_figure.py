@@ -45,7 +45,10 @@ def main() -> None:
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(a.tokenizer)
-    ev = [json.loads(l) for l in open(ROOT / a.events)]
+    epath = Path(a.events)
+    if not epath.exists():
+        epath = ROOT / a.events
+    ev = [json.loads(l) for l in open(epath)]
     by = collections.defaultdict(list)
     for e in ev:
         by[(e["query_uid"], e["generation_index"])].append(e)

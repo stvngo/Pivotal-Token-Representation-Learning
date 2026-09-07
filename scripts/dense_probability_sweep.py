@@ -55,7 +55,12 @@ def main() -> None:
         math_answers_from_dataset,
     )
 
-    ev = [json.loads(l) for l in open(ROOT / a.events)]
+    # colab_job uploads this next to the repo root, so ROOT resolves one
+    # level too high. Prefer the path as given (the job runs from the repo).
+    epath = Path(a.events)
+    if not epath.exists():
+        epath = ROOT / a.events
+    ev = [json.loads(l) for l in open(epath)]
     by = collections.defaultdict(list)
     for e in ev:
         by[(e["query_uid"], e["generation_index"])].append(e)
