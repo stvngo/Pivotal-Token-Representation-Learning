@@ -329,8 +329,7 @@ one-hot logistic form it measures $0.716$, $0.715$ and $0.791$, so the
 probe's margin over it does not increase ($+0.091$, $+0.148$, $+0.106$).
 Between 1.7B and 4B the probe and a purely lexical baseline improve in
 step, and some portion of what scale contributes is therefore accessible
-without appeal to a computed representation. The trend we report is a
-specific one: what widens with scale is the separation from predictive
+without appeal to a computed representation. We report that the separation widens from predictive
 uncertainty, not from token identity.
 
 \subsection{The sign of the impending shift is decodable, at scale}
@@ -1039,6 +1038,53 @@ trajectory.
 % than $\tau$. Bisection localises large moves; it does not follow the
 % trajectory, and the figure is drawn as points rather than a line so as not
 % to imply otherwise.
+
+\section{What the search misses}
+\label{app:dense}
+
+Figure~\ref{fig:example} has to be drawn as points because bisection only
+evaluates a handful of prefixes, which leaves the obvious question open:
+between those points, does the probability move in ways the search never
+sees? For a single branch this is answerable. We re-estimated
+$P(\text{success})$ at \emph{every} one of the 327 prefixes of the
+Section~\ref{app:example} rollout, 40 fresh rollouts each --- 110 seconds
+on one GPU --- and overlaid the result on what the search recorded.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/dense_vs_bisection.pdf}
+\caption{Every prefix re-estimated (line) against the estimates bisection
+actually made (circles) and the events it accepted (arrows). The
+high-frequency movement in the flat region is sampling noise, not
+structure: at $S{=}40$ and $p \approx 0.5$ the standard error is $0.079$,
+and the mean absolute step between adjacent positions is $0.050$. The
+dotted arrow is an accepted event that does not survive re-measurement.}
+\label{fig:dense}
+\end{figure}
+
+\paragraph{The large moves are all found, and they replicate closely.}
+Every single-token step of $0.25$ or more in the dense curve is an event
+the search accepted --- positions 278, 291, 296 and 385, with no misses at
+that threshold or above. On those four, the two independent measurements
+agree to within $0.02$: $+0.32$ against $+0.30$, $-0.55$ against $-0.53$,
+$+0.70$ against $+0.68$, and $-1.00$ against $-1.00$. Bisection is not
+skipping over structure; where the probability genuinely moves, it finds
+it.
+
+\paragraph{At the threshold itself, both measurements are noise-limited.}
+Exactly at $\tau = 0.2$ there is one disagreement in each direction. The
+search accepted position 290 at $\pdelta = +0.20$; re-measured, that
+transition is $+0.03$. And the dense curve shows a $-0.20$ step at
+position 80 that the search never tested. Neither is a defect of
+bisection. Both sit precisely where Section~\ref{sec:labelnoise} predicts
+disagreement: a difference of two binomials at $S{=}40$ has a standard
+error near $0.08$, so a threshold at $0.2$ is about $2.5\sigma$, and
+events accepted near the boundary are the ones that will not replicate.
+This is the analytical label-noise argument caught in the act on a single
+example --- one of five accepted events on this branch does not survive an
+independent re-measurement, which is the same order as the $1$--$5\%$
+non-replication rate the two-proportion test gives across the full event
+set.
 
 \section{Which tokens are pivotal}
 \label{app:tokens}
