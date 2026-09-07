@@ -1039,52 +1039,60 @@ trajectory.
 % trajectory, and the figure is drawn as points rather than a line so as not
 % to imply otherwise.
 
-\section{What the search misses}
+% \section{What the search misses}
 \label{app:dense}
 
 Figure~\ref{fig:example} has to be drawn as points because bisection only
 evaluates a handful of prefixes, which leaves the obvious question open:
 between those points, does the probability move in ways the search never
 sees? For a single branch this is answerable. We re-estimated
-$P(\text{success})$ at \emph{every} one of the 327 prefixes of the
-Section~\ref{app:example} rollout, 40 fresh rollouts each --- 110 seconds
-on one GPU --- and overlaid the result on what the search recorded.
+$P(\text{success})$ at \emph{every} prefix of two branches --- 320 and 327
+positions, 40 fresh rollouts each, four and two minutes on one GPU --- and
+overlaid the result on what the search recorded.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.95\textwidth]{figures/dense_vs_bisection.pdf}
 \caption{Every prefix re-estimated (line) against the estimates bisection
-actually made (circles) and the events it accepted (arrows). The
-high-frequency movement in the flat region is sampling noise, not
-structure: at $S{=}40$ and $p \approx 0.5$ the standard error is $0.079$,
-and the mean absolute step between adjacent positions is $0.050$. The
+actually made (circles) and the events it accepted (arrows). Top: the
+Qwen3-4B GSM8K branch. Bottom: the Qwen3-1.7B MATH branch of
+Section~\ref{app:example}. The high-frequency movement is sampling noise
+rather than structure --- at $S{=}40$ and $p \approx 0.5$ the standard
+error is $0.079$, against mean absolute steps of $0.034$ and $0.050$. The
 dotted arrow is an accepted event that does not survive re-measurement.}
 \label{fig:dense}
 \end{figure}
 
-\paragraph{The large moves are all found, and they replicate closely.}
-Every single-token step of $0.25$ or more in the dense curve is an event
-the search accepted --- positions 278, 291, 296 and 385, with no misses at
-that threshold or above. On those four, the two independent measurements
-agree to within $0.02$: $+0.32$ against $+0.30$, $-0.55$ against $-0.53$,
-$+0.70$ against $+0.68$, and $-1.00$ against $-1.00$. Bisection is not
-skipping over structure; where the probability genuinely moves, it finds
-it.
+\paragraph{The large moves are found, and they replicate.} On the GSM8K
+branch, agreement is exact: all five accepted events reappear in the dense
+curve, and no step of $0.2$ or more anywhere in the sequence was missed.
+On the MATH branch, four of five reappear and the four agree to within
+$0.02$ --- $+0.32$ against $+0.30$, $-0.55$ against $-0.53$, $+0.70$
+against $+0.68$, $-1.00$ against $-1.00$. Across both branches, every
+single-token step of $0.25$ or more is an event the search accepted.
+Bisection is not stepping over structure it never sees; where the
+probability genuinely moves, it finds it.
 
 \paragraph{At the threshold itself, both measurements are noise-limited.}
-Exactly at $\tau = 0.2$ there is one disagreement in each direction. The
-search accepted position 290 at $\pdelta = +0.20$; re-measured, that
-transition is $+0.03$. And the dense curve shows a $-0.20$ step at
-position 80 that the search never tested. Neither is a defect of
-bisection. Both sit precisely where Section~\ref{sec:labelnoise} predicts
-disagreement: a difference of two binomials at $S{=}40$ has a standard
-error near $0.08$, so a threshold at $0.2$ is about $2.5\sigma$, and
-events accepted near the boundary are the ones that will not replicate.
-This is the analytical label-noise argument caught in the act on a single
-example --- one of five accepted events on this branch does not survive an
-independent re-measurement, which is the same order as the $1$--$5\%$
-non-replication rate the two-proportion test gives across the full event
-set.
+The exceptions are all at $\tau$. On the MATH branch the search accepted
+position 290 at $\pdelta = +0.20$, and re-measured that transition is
+$+0.03$; the dense curve also shows a $-0.20$ step at position 80 that the
+search never tested. Neither is a defect of bisection, and both sit
+exactly where Section~\ref{sec:labelnoise} says disagreement should live:
+a difference of two binomials at $S{=}40$ has standard error near $0.08$,
+so a threshold at $0.2$ is about $2.5\sigma$ and boundary events are the
+ones that will not replicate. One of ten accepted events across the two
+branches fails an independent re-measurement, and it is the one accepted
+at exactly $\tau$.
+
+\paragraph{What the trajectories look like.} Worth noting for its own
+sake: neither curve resembles a smooth descent into an answer. The GSM8K
+branch sits at zero for seventy tokens, jumps to near-certainty at the
+first correct equation, collapses at the second, and oscillates in the
+band for the rest of the rollout. Success probability under this model is
+better described as a sequence of commitments than as an accumulation of
+evidence, which is the property that makes a token-level notion of
+pivotality meaningful in the first place.
 
 \section{Which tokens are pivotal}
 \label{app:tokens}
