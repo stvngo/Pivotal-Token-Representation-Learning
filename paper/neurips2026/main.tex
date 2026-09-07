@@ -274,15 +274,18 @@ pivots occur (Section~\ref{sec:negatives}), and all splits are by question.
 
 Table~\ref{tab:main} reports each detector at each model scale, with the
 paired difference from the probe bootstrapped on the same resampled
-questions. The probe separates from every baseline at every scale.
+questions. The probe separates from every baseline at every scale, though
+the margin over the mean-difference direction at 4B is marginal --- its
+interval reaches to $+0.0002$.
 
 \begin{table}[t]
   \centering
   \caption{Predicting whether the \emph{next} token is pivotal, from the
   residual stream at $t-1$. Values are AUROC; parenthesised values are the
   paired difference (probe $-$ baseline) with its 95\% interval over
-  question-level resamples. A random direction has null mean 0.49 with a
-  5--95 range of $[0.40, 0.62]$, so single draws in that band are
+  question-level resamples. A random direction has null mean near 0.50, with
+  5--95 ranges of $[0.38, 0.62]$, $[0.37, 0.67]$ and $[0.35, 0.63]$ at the
+  three scales over 200 draws, so single draws inside those bands are
   unremarkable.}
   \label{tab:main}
   \small
@@ -293,7 +296,7 @@ questions. The probe separates from every baseline at every scale.
     & ($L{=}22$) & ($L{=}23$) & ($L{=}24$) \\
     \midrule
     \textbf{Linear probe} & \textbf{0.807} & \textbf{0.863} & \textbf{0.897} \\
-    Mean-difference (CAA) & 0.774 \tiny{($+.034$ [$+.015,+.055$])} & 0.841 \tiny{($+.023$ [$+.008,+.037$])} & 0.868 \tiny{($+.029$ [$+.000,+.059$])} \\
+    Mean-difference (CAA) & 0.774 \tiny{($+.034$ [$+.015,+.055$])} & 0.841 \tiny{($+.023$ [$+.008,+.037$])} & 0.868 \tiny{($+.029$ [$+.0002,+.059$])} \\
     \midrule
     Token identity (LR) & 0.716 \tiny{($+.091$ [$+.032,+.154$])} & 0.715 \tiny{($+.149$ [$+.105,+.191$])} & 0.791 \tiny{($+.107$ [$+.071,+.144$])} \\
     Token identity (freq.) & 0.696 \tiny{($+.110$ [$+.050,+.169$])} & 0.688 \tiny{($+.176$ [$+.129,+.225$])} & 0.785 \tiny{($+.113$ [$+.078,+.150$])} \\
@@ -340,9 +343,9 @@ model represents, one step early, that it is about to make a mistake.
 
 This question is immune to Section~\ref{sec:negatives} by construction.
 Entropy is sign-blind: it cannot distinguish a helpful branch point from a
-harmful one, and indeed scores \emph{below} chance on this task at every
-scale (0.514, 0.428, 0.434). Whatever a signed probe reads, it is not
-predictive uncertainty.
+harmful one. Empirically it sits at chance at 0.6B (0.514) and
+\emph{below} chance at the two larger scales (0.428, 0.434). Whatever a
+signed probe reads, it is not predictive uncertainty.
 
 Restricting to pivotal positions and relabelling by
 $\mathrm{sign}(\pdelta)$ gives Table~\ref{tab:signed}.
@@ -384,8 +387,8 @@ data is weak, and strong only where scale supports it.
 
 \paragraph{Why $t-1$ over $t$?}
 Probing the pivotal token instead raises the signed probe to 0.697, 0.859 and
-0.890. Though, most of the improvement could be attributed to token identity, 
-which rises from 0.56--0.70 at $t-1$ to 0.74--0.85 at $t$, 
+0.890. Much of that gain is available to token identity, whose one-hot form
+rises from 0.55--0.69 at $t-1$ to 0.72--0.85 at $t$, 
 because at the pivotal token, the token being classified \emph{is} the pivot, 
 and helpful and harmful tokens could differ lexically. 
 At 0.6B the lookup table actually beats the probe there (0.735
