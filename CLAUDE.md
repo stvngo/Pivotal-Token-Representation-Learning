@@ -271,6 +271,13 @@ clean sessions reproduced a 237-question base rate *exactly*. Never mix
 a vLLM-modified session and a clean one across arms you intend to compare;
 within-run pairing is unaffected either way.
 
+**MATH extraction belongs on a GPU, unlike GSM8K.** GSM8K activation
+extraction is ~7 min on the M3 because sequences are ~350 tokens. MATH
+rollouts run to ~1,900, and MPS degrades with length rather than scaling
+linearly: measured 5 s/branch at the start and 47 s/branch by branch 99,
+projecting >2 h for one split of one model. Extract on the GPU that just
+finished the search, before releasing it.
+
 **Size `max_model_len` for bisection, not for one rollout — a short window
 hangs the run.** Bisection conditions on ever-longer prefixes, so a deep
 node needs `prompt + 2 x max_new_tokens`. Set to one rollout's worth, vLLM
