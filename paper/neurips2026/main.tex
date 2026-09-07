@@ -336,15 +336,15 @@ uncertainty, not from token identity.
 \subsection{The sign of the impending shift is decodable, at scale}
 \label{sec:signed}
 
-Pivotality as defined in Eq.~\ref{eq:pts} is symmetric: a token that
-rescues an answer and one that ruins it receive the same label. The sharper
-question is whether the \emph{sign} is decodable at $t-1$ --- whether the
+Pivotality as defined in Eq.~\ref{eq:pts} is symmetric. A token that
+raises the success probability of an answer and one that ruins it receive the same label. 
+Another question is whether the \emph{sign} is decodable at $t-1$ --- whether the
 model represents, one step early, that it is about to make a mistake.
 
 This question is immune to Section~\ref{sec:negatives} by construction.
 Entropy is sign-blind: it cannot distinguish a helpful branch point from a
-harmful one. Empirically it sits at chance at 0.6B (0.514) and
-\emph{below} chance at the two larger scales (0.428, 0.434). Whatever a
+harmful one. Empirically it sits at chance at 0.6B (0.514) and slightly
+below chance at the two larger scales (0.428, 0.434). Whatever a
 signed probe reads, it is not predictive uncertainty.
 
 Restricting to pivotal positions and relabelling by
@@ -946,6 +946,47 @@ classifies, but along a substantially different direction --- which matters
 for anyone intending to use the weights as an intervention direction rather
 than only as a classifier.
 
+
+\section{What a searched rollout looks like}
+\label{app:example}
+
+The definition in Eq.~\ref{eq:pts} and the AUROCs in
+Section~\ref{sec:results} say what pivotality is and how well it decodes,
+but not what one actually looks like. This is a single Qwen3-4B branch
+from our GSM8K run, chosen for having several accepted pivots spread
+through the rollout rather than clustered at its end.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.92\textwidth]{figures/example_rollout_probability.pdf}
+\caption{Estimated success probability along one searched rollout. Grey
+points are the estimates the search actually made; arrows are the accepted
+pivots. Note that the points are sparse and unevenly spaced: PTS bisects
+rather than sweeping, so it evaluates on the order of fourteen midpoints
+per rollout, and the accepted events are the subset where the probability
+moved by more than $\tau$. A smooth curve over every token would depict a
+measurement that was never taken. The shaded region is the $[0.2, 0.8]$
+band a query must start inside to be searched at all.}
+\label{fig:example}
+\end{figure}
+
+\input{example_rollout}
+
+Two things in this example are worth drawing out. The two largest
+movements both land on \texttt{=}, the token at which the model commits to
+a computed value --- $0.00 \to 0.85$ when it writes
+\emph{Steven's falls = 3} correctly, and $1.00 \to 0.17$ when it commits
+to \emph{Stephanie's falls = 16} and then, in the continuation, mishandles
+``2 times less than half''. Pivotality here is not a property of the token
+string: the same token \texttt{=} is helpful at one position and harmful
+at another, which is precisely why a lookup on token identity
+(Table~\ref{tab:main}) can only go so far.
+
+Second, the probability is far from monotone. It recovers from $0.17$ to
+$1.00$ between positions 203 and 202's successor without any accepted
+event in between, because no tested midpoint in that interval exceeded
+$\tau$. The search localises large moves; it does not track the
+trajectory.
 
 \section{Reproduction}
 
