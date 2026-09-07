@@ -35,7 +35,9 @@ def main() -> None:
     ap.add_argument("--query", default="1714")
     ap.add_argument("--generation", type=int, default=0)
     ap.add_argument("--dataset", default="openai/gsm8k")
+    ap.add_argument("--config", default="main")
     ap.add_argument("--split", default="train")
+    ap.add_argument("--task", default="gsm8k", choices=["gsm8k", "math"])
     ap.add_argument("--samples", type=int, default=40)
     ap.add_argument("--stride", type=int, default=1, help="evaluate every k-th position")
     ap.add_argument("--max-new-tokens", type=int, default=320)
@@ -48,7 +50,10 @@ def main() -> None:
 
     from pts_harness.backends.base import RolloutRequest
     from pts_harness.backends.vllm import VLLMRolloutBackend
-    from pts_harness.oracle import GSM8KOracle, gsm8k_answers_from_dataset
+    from pts_harness.oracle import (
+        GSM8KOracle, MathOracle, gsm8k_answers_from_dataset,
+        math_answers_from_dataset,
+    )
 
     ev = [json.loads(l) for l in open(ROOT / a.events)]
     by = collections.defaultdict(list)
@@ -59,11 +64,16 @@ def main() -> None:
         raise SystemExit(f"no events for query {a.query}")
     seq, plen = list(es[0]["sequence_token_ids"]), es[0]["prompt_len"]
 
-    ds = load_dataset(a.dataset, "main", split=a.split)
-    answers = gsm8k_answers_from_dataset(ds)
-    row = ds[int(a.query)]
-    oracle = GSM8KOracle(answers)
-    question = row["question"]
+    ds = (load_dataset(a.dataset, a.config, split=a.split) if a.config
+          else load_dataset(a.dataset, split=a.split))
+    if a.task == "math":
+        answers = math_answers_from_dataset(ds)
+        oracle = MathOracle(answers)
+        question = ds[int(a.query)]["problem"]
+    else:
+        answers = gsm8k_answers_from_dataset(ds)
+        oracle = GSM8KOracle(answers)
+        question = ds[int(a.query)]["question"]
 
     positions = list(range(plen, len(seq), a.stride))
     print(f"[1/3] query {a.query}: prompt {plen}, sequence {len(seq)}, "
